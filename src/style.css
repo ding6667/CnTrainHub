@@ -49,9 +49,10 @@ body {
   outline: none;
 }
 
-/* Push the neutral grey basemap toward the #0a0a1a blue-black look. */
+/* Darken the basemap with a single composited opacity instead of a per-frame
+   CSS filter on the whole tile pane. */
 .leaflet-tile-pane {
-  filter: brightness(0.62) sepia(0.5) hue-rotate(178deg) saturate(1.9) contrast(1.04);
+  opacity: 0.8;
 }
 
 .leaflet-control-attribution {
@@ -146,22 +147,6 @@ body {
 
 /* ---------- station + bureau markers ---------- */
 
-.station-dot {
-  border-radius: 50%;
-  background: #f2f6ff;
-  box-shadow: 0 0 6px rgba(226, 232, 255, 0.9);
-  transition: transform 160ms ease-out;
-}
-
-.station-dot--hub {
-  background: #ffe08a;
-  box-shadow: 0 0 8px rgba(255, 200, 80, 0.85);
-}
-
-.station-marker:hover .station-dot {
-  transform: scale(1.35);
-}
-
 .station-label {
   color: #cfe0ff;
   font-size: 11px;
@@ -187,14 +172,36 @@ body {
   border-radius: 2px;
 }
 
-.bureau-icon.is-dimmed {
-  opacity: 0.25;
+.dot,
+.diamond {
+  display: inline-block;
+  vertical-align: middle;
 }
 
-.growth-tip {
+.dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 10px 3px rgba(255, 255, 255, 0.55);
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.dot--2 {
+  width: 7px;
+  height: 7px;
+}
+
+.dot--3 {
+  width: 5px;
+  height: 5px;
+}
+
+.diamond {
+  width: 9px;
+  height: 9px;
+  transform: rotate(45deg);
+  border: 1.5px solid currentColor;
+  box-shadow: 0 0 6px currentColor;
 }
 
 /* ---------- topbar ---------- */
@@ -442,11 +449,68 @@ body {
   border-color: var(--accent);
 }
 
+.check em {
+  font-style: normal;
+  color: #6f7fa6;
+  font-variant-numeric: tabular-nums;
+}
+
 .check .swatch {
   width: 14px;
   height: 3px;
   border-radius: 2px;
   background: currentColor;
+}
+
+.btn.is-on {
+  border-color: rgba(95, 212, 255, 0.55);
+  color: var(--accent);
+}
+
+.net-status {
+  position: absolute;
+  z-index: 1100;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms ease-out;
+}
+
+.net-status:not(:empty) {
+  opacity: 1;
+}
+
+/* ---------- hover feedback ---------- */
+
+.hover-tip {
+  position: absolute;
+  z-index: 1250;
+  top: 0;
+  left: 0;
+  padding: 4px 9px;
+  border: 1px solid rgba(95, 212, 255, 0.4);
+  border-radius: 7px;
+  background: rgba(10, 12, 26, 0.92);
+  color: var(--text);
+  font-size: 11.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  will-change: transform;
+}
+
+.hover-tip.is-on {
+  opacity: 1;
 }
 
 .panel-foot {
