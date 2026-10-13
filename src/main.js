@@ -1,6 +1,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
+import { TRAIN_MODELS, BUREAU_TRAINS, trainSvg, trainSpec } from './trains.js';
 
 /* ------------------------------------------------------------------ *
  * Config
@@ -422,14 +423,15 @@ function nearBBox(bbox, lat, lng, pad) {
   return lng >= bbox[0] - pad && lng <= bbox[2] + pad && lat >= bbox[1] - pad && lat <= bbox[3] + pad;
 }
 
-function pickFeature(latlng, { withEdges = false } = {}) {
+function pickFeature(latlng, { withEdges = false, scale = 1, only = null } = {}) {
   const lat = latlng.lat ?? latlng[0];
   const lng = latlng.lng ?? latlng[1];
   const kpp = kmPerPx();
   let best = null;
 
   const consider = (kind, rec, dKm, radiusPx) => {
-    const reach = radiusPx * kpp;
+    if (only && kind !== only) return;
+    const reach = radiusPx * kpp * scale;
     if (dKm > reach) return;
     const score = dKm / reach;
     if (!best || score < best.score) best = { kind, rec, dKm, score };
@@ -456,7 +458,55 @@ function pickFeature(latlng, { withEdges = false } = {}) {
   return best;
 }
 
-/** Nearest visible named corridor within reach, independent of other picks. */
+/**
+ * Single click authority. The bureau diamonds sit exactly on their hub
+ * station, so the marker is split by radius: the middle few pixels belong to
+ * the station, the rest of the diamond to the bureau. Resolving this in one
+ * place (rather than in a marker handler) avoids the mouseup-then-click
+ * ordering race, where the map would re-pick the station after the marker had
+ * already opened the bureau card.
+ */
+function pickAt(latlng) {
+  const at = map.latLngToContainerPoint(latlng);
+  let bureau = null;
+  let bPx = null;
+  let bD = 9;
+  for (const b of state.data.bureaus) {
+    if (!b.onMap) continue;
+    const p = map.latLngToContainerPoint(b.latlng);
+    const d = Math.hypot(p.x - at.x, p.y - at.y);
+    if (d <= bD) {
+      bD = d;
+      bPx = p;
+      bureau = b;
+    }
+  }
+
+  if (bureau) {
+    // Measured against the bureau's own centre, not against arbitrary stations:
+    // at country zoom a 5 px radius spans ~45 km and would let a neighbouring
+    // station (广州南 for 广州) steal the whole marker.
+    if (bD <= 5) {
+      let station = null;
+      let sD = 4;
+      for (const st of state.data.stations) {
+        if (!st.onMap) continue;
+        const p = map.latLngToContainerPoint(st.latlng);
+        const d = Math.hypot(p.x - bPx.x, p.y - bPx.y);
+        if (d <= sD) {
+          sD = d;
+          station = st;
+        }
+      }
+      if (station) return { kind: 'station', rec: station };
+    }
+    return { kind: 'bureau', rec: bureau };
+  }
+
+  return pickFeature(latlng, { withEdges: true });
+}
+
+/** Nearest line within reach, for hover thickening. */
 function nearestLine(latlng) {
   const lat = latlng.lat ?? latlng[0];
   const lng = latlng.lng ?? latlng[1];
@@ -491,15 +541,17 @@ function drawBureaus(bureaus) {
         { className: 'bureau-tip', direction: 'top', offset: [0, -10], opacity: 1 }
       );
 
-    // A bureau marker sits on top of its hub station and consumes the click,
-    // so prefer whatever is underneath it, falling back to the bureau itself.
+    // An interactive marker consumes the map's 'click' (only 'preclick'
+    // reaches the map), so the marker has to resolve its own hit: pickAt
+    // returns the hub station for the centre of the diamond and the bureau
+    // for the rest of it. Note e.latlng on a marker click is the *marker's*
+    // coordinate, so the real pointer position has to come from the DOM event.
     b.marker.on('click', (e) => {
-      L.DomEvent.stopPropagation(e);
-      const at = e.latlng ?? b.latlng;
-      const hit = pickFeature(at);
-      if (hit?.kind === 'station') return showCard('station', hit.rec, hit.rec.latlng);
-      if (hit?.kind === 'line') return showCard('line', hit.rec, at);
-      showCard('bureau', b, at);
+      const oe = e.originalEvent;
+      const at = oe ? map.containerPointToLatLng(map.mouseEventToContainerPoint(oe)) : b.latlng;
+      b.marker.closeTooltip();
+      const hit = pickAt(at);
+      if (hit) showCard(hit.kind, hit.rec, hit.kind === 'station' ? hit.rec.latlng : at);
     });
   }
 }
@@ -962,11 +1014,26 @@ function bureauCardHtml(rec) {
   const stations = state.data.stations.filter((s) => s.props.bureau === p.bureau);
   const lines = new Set();
   for (const s of stations) for (const n of linesThroughStation(s)) lines.add(n);
+
+  const models = BUREAU_TRAINS[p.bureau] ?? [];
+  const gallery = models.length
+    ? `<div class="emu-list">${models
+        .map((id) => {
+          const m = TRAIN_MODELS[id];
+          return `<figure class="emu-row">
+              ${trainSvg(id, { cars: 4, uid: `${p.id}-${id}` })}
+              <figcaption><b>${id}</b><span>${trainSpec(id)}</span><em>${m.origin}</em></figcaption>
+            </figure>`;
+        })
+        .join('')}</div>
+       <p class="emu-note">配属据公开报道整理，非官方现车表；侧视图为代码绘制的示意图形（内联 SVG）。</p>`
+    : '<p class="emu-note">该路局暂无已整理的动车组配属记录。</p>';
+
   return `
     <div class="card-head">
       <div>
         <h3 class="card-title">${p.name}</h3>
-        <p class="card-sub">中国铁路${p.bureau}集团有限公司</p>
+        <p class="card-sub">机关驻地 ${p.shortName} · ${stations.length} 座车站 · ${models.length} 型动车组</p>
       </div>
       <button type="button" class="card-close" aria-label="关闭">✕</button>
     </div>
@@ -977,7 +1044,9 @@ function bureauCardHtml(rec) {
       ${row('境内车站', `${stations.length} 座`)}
       ${row('经过干线', lines.size ? `${lines.size} 条` : '—')}
       ${row('坐标', `${rec.latlng[1].toFixed(4)}°E ${rec.latlng[0].toFixed(4)}°N`)}
-    </dl>`;
+    </dl>
+    <h4 class="emu-heading">配属车型 · ${models.length} 型</h4>
+    ${gallery}`;
 }
 
 function createHoverTip() {
@@ -1009,6 +1078,7 @@ function showCard(kind, rec, latlng) {
     station: (r) => stationCardHtml(r, linesThroughStation(r)),
   };
   card.innerHTML = render[kind](rec);
+  card.classList.toggle('card--wide', kind === 'bureau');
   card.setAttribute('aria-hidden', 'false');
   card.querySelector('.card-close').addEventListener('click', hideCard);
   card.classList.remove('is-open');
@@ -1248,7 +1318,7 @@ async function boot() {
 
   map.on('click', (e) => {
     if (cardJustOpened) return;
-    const hit = pickFeature(e.latlng, { withEdges: true });
+    const hit = pickAt(e.latlng);
     if (hit) {
       showCard(hit.kind, hit.rec, hit.kind === 'station' ? hit.rec.latlng : e.latlng);
       return;
@@ -1292,7 +1362,7 @@ async function boot() {
 
   // Test seam: lets the dev harness project a latlng to a pixel so it can
   // click canvas-drawn markers. Tree-shaken out of production builds.
-  if (import.meta.env.DEV) window.CNTHUB = { map: () => map, state };
+  if (import.meta.env.DEV) window.CNTHUB = { map: () => map, state, pickAt, pickFeature };
 }
 
 boot();

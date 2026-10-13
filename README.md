@@ -58,6 +58,7 @@ npm run preview    # 本地预览构建产物
 index.html                 单页骨架：地图容器、筛选面板、信息卡片、图例、加载层
 vite.config.js             publicDir 关闭（数据改为打包 import）
 src/main.js                地图、动画、分级、筛选、拾取与悬浮、卡片、路网加载
+src/trains.js              动车组侧视 SVG（symbol/use + 贝塞尔车头）与配属表
 src/style.css              深色科技风、发光、卡片过渡、悬浮提示、响应式
 scripts/build-data.mjs     从真实数据源重新生成 data/*.json
 data/railways.json         31 条命名线路（真实 OSM 几何）
@@ -135,6 +136,21 @@ netlify deploy --build --prod    # 生产
 ```
 
 两个平台也可用 Git 集成：Build command `npm run build`，Publish directory `dist`。
+
+## 动车组侧视图（代码绘制）
+
+`src/trains.js` 用内联 SVG 画各型号侧视剖面，不引用任何图片：
+
+- **`<symbol>` + `<use>` 复用标准车厢**：`<defs>` 里定义一节 `<symbol id="car-*" viewBox="0 0 116 64">`，`<rect>` 画车顶/车身/车窗带/裙板、`<circle>` 画轮对、`<line>` 画车厢连接处；编组用 `<use href x y width height>` 按固定间距横排，加一节车厢只多一行。
+- **车头单独用 `<path>` + 三次贝塞尔**：鼻锥是唯一能识别型号的形状，不做 symbol。三种壳形 `pointy`（CRH380A / CR400 系）、`round`（CRH2 / CRH5，新干线与潘多利诺后裔）、`boxy`（CRH1 / CRH3，Regina 与 Velaro 平台），车尾用 `scale(-1,1)` 镜像。
+- **`<linearGradient>`** 做车身金属渐变、车窗玻璃反光、腰线渐变；全部整数坐标；**背景透明**；**不使用 `<filter>`**（部分浏览器对带 filter 的 SVG 渲染空白）。
+- 卡片里画的是 4 节缩短编组（真实编组数以文字标注），因为 8 节缩到卡片宽度就看不清鼻型了。
+
+收录 10 个型号：CRH1A、CRH2A、CRH3C、CRH5A、CRH380A、CRH380B、CR400AF、CR400BF、CR300AF、CR200J。
+
+点击地图上的**铁路局菱形**，卡片下半部即列出该局配属车型及其侧视图。菱形按半径分区：正中约 5 px 归其下的枢纽车站，外圈归路局——否则路局标记（16 px）会把枢纽站完全盖住，两个目标至少有一个点不到。
+
+> 配属车型是**据公开报道整理**，不是官方现车表；卡片与 `BUREAU_TRAINS` 注释都已标明。型号本身的涂装/原型/速度为公开资料，CR400AF 为银灰车身红飘带（中车四方）、CR400BF 为金飘带（中车长客/唐车，昵称"金凤凰"）、CR200J 为绿色动力集中（昵称"绿巨人"，160 km/h）。
 
 ## 已知限制
 
