@@ -1,0 +1,21 @@
+{
+  "name": "cn-train-hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "China railway network visualization — Vite + Leaflet + vanilla JS",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:data": "node scripts/build-data.mjs"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "@railroute-ts/china": "^2026.9.1",
+    "railroute-ts": "^0.2.1",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a1a" />
+    <title>CnTrainHub · 中国铁路网络可视化</title>
+    <meta
+      name="description"
+      content="基于 Vite + Leaflet 的中国铁路网络可视化：高铁/普速干线生长动画、缩放分级显示、路局与车站筛选。"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230a0a1a'/><path d='M5 23 L13 11 L18 19 L27 7' stroke='%23e63946' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>"
+    />
+    <link rel="preconnect" href="https://basemaps.cartocdn.com" crossorigin />
+  </head>
+  <body>
+    <div id="app">
+      <div id="map" aria-label="中国铁路网络地图"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <div class="brand-text">
+            <h1>CnTrainHub</h1>
+            <p>中国铁路网络可视化</p>
+          </div>
+        </div>
+        <div class="stats" id="stats" aria-live="polite">
+          <div class="stat"><b id="stat-lines">–</b><span>线路</span></div>
+          <div class="stat"><b id="stat-stations">–</b><span>车站</span></div>
+          <div class="stat"><b id="stat-km">–</b><span>运营里程</span></div>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="replay" class="btn">重播生长动画</button>
+          <button type="button" id="toggle-network" class="btn btn-ghost" title="约 4.4 MB，加载后作为底图显示">
+            全量路网
+          </button>
+          <button type="button" id="panel-toggle" class="btn btn-icon" aria-expanded="true" aria-controls="panel">
+            ☰
+          </button>
+        </div>
+      </header>
+
+      <aside class="panel" id="panel" aria-label="筛选面板">
+        <div class="panel-head">
+          <h2>筛选</h2>
+          <button type="button" class="btn btn-icon panel-close" id="panel-close" aria-label="收起面板">✕</button>
+        </div>
+
+        <section class="filter-group">
+          <div class="filter-head">
+            <h3>线路类型</h3>
+            <button type="button" class="link" data-all="lineTypes">全选</button>
+          </div>
+          <div class="checks" id="filter-line-types"></div>
+        </section>
+
+        <section class="filter-group">
+          <div class="filter-head">
+            <h3>车站等级</h3>
+            <button type="button" class="link" data-all="stationTiers">全选</button>
+          </div>
+          <div class="checks" id="filter-station-tiers"></div>
+        </section>
+
+        <section class="filter-group">
+          <div class="filter-head">
+            <h3>铁路局</h3>
+            <button type="button" class="link" data-all="bureaus">全选</button>
+          </div>
+          <div class="checks checks--scroll" id="filter-bureaus"></div>
+        </section>
+
+        <div class="panel-foot" id="panel-foot"></div>
+      </aside>
+
+      <div class="legend" id="legend"></div>
+
+      <article class="card" id="card" role="dialog" aria-live="polite" aria-hidden="true"></article>
+
+      <div class="loader" id="loader">
+        <div class="loader-ring"></div>
+        <p id="loader-text">正在加载铁路数据…</p>
+      </div>
+
+      <div class="zoom-badge" id="zoom-badge"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
