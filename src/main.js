@@ -1,7 +1,7 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
-import { TRAIN_MODELS, BUREAU_TRAINS, trainSvg, trainSpec } from './trains.js';
+import { TRAIN_MODELS, BUREAU_FLEETS, FLEET_AS_OF, trainSvg, trainSpec } from './trains.js';
 
 /* ------------------------------------------------------------------ *
  * Config
@@ -1015,19 +1015,30 @@ function bureauCardHtml(rec) {
   const lines = new Set();
   for (const s of stations) for (const n of linesThroughStation(s)) lines.add(n);
 
-  const models = BUREAU_TRAINS[p.bureau] ?? [];
+  const fleet = BUREAU_FLEETS[p.bureau] ?? { models: [] };
+  const models = fleet.models;
+  const total =
+    fleet.units == null
+      ? '—'
+      : `${fleet.units.toLocaleString('zh-CN')} ${fleet.unit ?? '组'}`;
+
   const gallery = models.length
     ? `<div class="emu-list">${models
         .map((id) => {
           const m = TRAIN_MODELS[id];
+          if (!m) return '';
           return `<figure class="emu-row">
               ${trainSvg(id, { cars: 4, uid: `${p.id}-${id}` })}
               <figcaption><b>${id}</b><span>${trainSpec(id)}</span><em>${m.origin}</em></figcaption>
             </figure>`;
         })
         .join('')}</div>
-       <p class="emu-note">配属据公开报道整理，非官方现车表；侧视图为代码绘制的示意图形（内联 SVG）。</p>`
-    : '<p class="emu-note">该路局暂无已整理的动车组配属记录。</p>';
+       <p class="emu-note">
+        数据口径：${FLEET_AS_OF}公开报道整理，非官方现车表；"标准组"按 8 辆=1、16/17 辆=2 折算，部分局直接以"组"计。
+        ${fleet.note ? `注意：${fleet.note}。` : ''}
+        数量随新线开通与车辆调配动态变化，车组号级实时配属请查 EmuSearch 等专业库。
+       </p>`
+    : '<p class="emu-note">该路局暂无配属数据。</p>';
 
   return `
     <div class="card-head">
@@ -1041,6 +1052,7 @@ function bureauCardHtml(rec) {
     <dl class="card-rows">
       ${row('机关驻地', p.shortName)}
       ${row('管辖范围', p.scope)}
+      ${row('动车组配属', total)}
       ${row('境内车站', `${stations.length} 座`)}
       ${row('经过干线', lines.size ? `${lines.size} 条` : '—')}
       ${row('坐标', `${rec.latlng[1].toFixed(4)}°E ${rec.latlng[0].toFixed(4)}°N`)}
