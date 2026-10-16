@@ -11,3 +11,7 @@ dist/
 .netlify/
 .idea/
 .vscode/
+
+# Raw 26 MB AI-generated source mesh (4K bakes). Kept on disk as the modelling
+# input; the optimized 2.8 MB export in public/models/ is what ships.
+/*.glb

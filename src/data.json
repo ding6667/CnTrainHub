@@ -1,0 +1,41 @@
+{
+  "CR400BF-G": {
+    "name": "CR400BF-G",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 350,
+    "color": "#c0c0c0",
+    "accent": "#e11d2a",
+    "model": "/models/CR400BF-G.glb",
+    "title": "复兴号高寒动车组",
+    "note": "俗称“金凤凰”高寒版，8 辆编组，车体长 208.95 m、宽 3.36 m、高 4.05 m。",
+    "set": {
+      "headLength": 25.85,
+      "middleLength": 25.0,
+      "gap": 1.036,
+      "setLength": 208.95
+    }
+  },
+  "CR400BF-GZ": {
+    "name": "CR400BF-GZ",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 350,
+    "color": "#c0c0c0",
+    "accent": "#e11d2a",
+    "model": null,
+    "title": "复兴号高寒智能动车组",
+    "note": "高寒智能型，8 辆编组。3D 模型待建。"
+  },
+  "CR400BF-GS": {
+    "name": "CR400BF-GS",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 350,
+    "color": "#c0c0c0",
+    "accent": "#e11d2a",
+    "model": null,
+    "title": "复兴号高寒技术提升型动车组",
+    "note": "高寒技术提升型，8 辆编组。3D 模型待建。"
+  }
+}

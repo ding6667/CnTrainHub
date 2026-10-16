@@ -2,6 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { TRAIN_MODELS, BUREAU_FLEETS, FLEET_AS_OF, trainSvg, trainSpec } from './trains.js';
+import MODELS from './data.json';
 
 /* ------------------------------------------------------------------ *
  * Config
@@ -1027,9 +1028,13 @@ function bureauCardHtml(rec) {
         .map((id) => {
           const m = TRAIN_MODELS[id];
           if (!m) return '';
-          return `<figure class="emu-row">
+          const has3d = Boolean(MODELS[id] && MODELS[id].model);
+          return `<figure class="emu-row${has3d ? ' emu-row--3d' : ''}"${
+            has3d ? ` data-detail="${id}" role="link" tabindex="0" aria-label="查看 ${id} 3D 展示"` : ''
+          }>
               ${trainSvg(id, { cars: 4, uid: `${p.id}-${id}` })}
               <figcaption><b>${id}</b><span>${trainSpec(id)}</span><em>${m.origin}</em></figcaption>
+              ${has3d ? '<span class="emu-3d">3D</span>' : ''}
             </figure>`;
         })
         .join('')}</div>
@@ -1093,6 +1098,22 @@ function showCard(kind, rec, latlng) {
   card.classList.toggle('card--wide', kind === 'bureau');
   card.setAttribute('aria-hidden', 'false');
   card.querySelector('.card-close').addEventListener('click', hideCard);
+  // Rows for models that have a GLB jump to the 3D showcase page.
+  for (const row of card.querySelectorAll('[data-detail]')) {
+    const go = () => {
+      location.href = `detail.html?model=${encodeURIComponent(row.dataset.detail)}`;
+    };
+    row.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      go();
+    });
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        go();
+      }
+    });
+  }
   card.classList.remove('is-open');
 
   positionCard(latlng);

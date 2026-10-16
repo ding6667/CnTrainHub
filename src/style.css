@@ -729,6 +729,34 @@ body {
   background: rgba(95, 212, 255, 0.06);
 }
 
+.emu-row--3d {
+  position: relative;
+  cursor: pointer;
+}
+
+.emu-row--3d:hover {
+  border-color: var(--hsr);
+  background: rgba(230, 57, 70, 0.08);
+}
+
+.emu-row--3d:focus-visible {
+  outline: 2px solid var(--hsr);
+  outline-offset: 1px;
+}
+
+.emu-3d {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  padding: 1px 5px;
+  border: 1px solid rgba(230, 57, 70, 0.6);
+  border-radius: 4px;
+  color: var(--hsr);
+  font-size: 9.5px;
+  font-style: normal;
+  letter-spacing: 0.06em;
+}
+
 /* The drawing is transparent-background art, so it must not clip or scale oddly. */
 .emu-row svg.emu {
   display: block;
