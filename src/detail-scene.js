@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { TRACK, CATENARY } from './detail-config.js';
+import { TRACK, CATENARY, FORMATION } from './detail-config.js';
 
 const box = (w, h, d, x, y, z) => {
   const g = new THREE.BoxGeometry(w, h, d);
@@ -22,14 +22,17 @@ const strut = (a, b, r, seg = 6) => {
 /** 梯形道床：顶窄底宽，读起来是路基而不是悬空的板。 */
 function ballastGeometry() {
   const { top, bottom, height, y } = TRACK.ballast;
-  const half = TRACK.span / 2;
-  const yt = y + height / 2;
-  const yb = y - height / 2;
-  const ht = top / 2;
-  const hb = bottom / 2;
+  return prismGeometry(top, bottom, y + height / 2, y - height / 2, TRACK.span, 0);
+}
+
+/** 梯形棱柱：顶窄底宽的路基/道床断面，两端封口。 */
+function prismGeometry(topW, botW, topY, botY, len, cx = 0) {
+  const half = len / 2;
+  const ht = topW / 2;
+  const hb = botW / 2;
   const v = [
-    [-ht, yt, -half], [ht, yt, -half], [ht, yt, half], [-ht, yt, half],
-    [-hb, yb, -half], [hb, yb, -half], [hb, yb, half], [-hb, yb, half],
+    [cx - ht, topY, -half], [cx + ht, topY, -half], [cx + ht, topY, half], [cx - ht, topY, half],
+    [cx - hb, botY, -half], [cx + hb, botY, -half], [cx + hb, botY, half], [cx - hb, botY, half],
   ];
   const faces = [
     [0, 1, 2, 3], [7, 6, 5, 4], [4, 5, 1, 0],
@@ -38,9 +41,10 @@ function ballastGeometry() {
   const pos = [];
   const uv = [];
   for (const f of faces) {
-    for (const i of [f[0], f[1], f[2], f[0], f[2], f[3]]) {
+    // 反绕序：上面的 face 表是俯视顺时针，直接三角化会让法线朝内被背面剔除
+    for (const i of [f[3], f[2], f[1], f[3], f[1], f[0]]) {
       pos.push(...v[i]);
-      uv.push((v[i][2] + half) / TRACK.span, v[i][1]);
+      uv.push((v[i][2] + half) / len, v[i][1]);
     }
   }
   const g = new THREE.BufferGeometry();
@@ -54,9 +58,9 @@ function mastGeometry() {
   const h = CATENARY.mastHeight;
   const parts = [];
   const pole = new THREE.CylinderGeometry(CATENARY.mastRadius, CATENARY.mastRadius * 1.35, h, 8);
-  pole.translate(0, h / 2 + TRACK.groundY, 0);
+  pole.translate(0, h / 2 + TRACK.formationY, 0);
   parts.push(pole);
-  parts.push(box(0.62, 0.24, 0.62, 0, TRACK.groundY + 0.12, 0));
+  parts.push(box(0.62, 0.24, 0.62, 0, TRACK.formationY + 0.12, 0));
   const topY = h - 1.5;
   const reach = CATENARY.armLength;
   parts.push(strut([0, topY, 0], [reach, topY - 0.12, 0], 0.055));
@@ -143,7 +147,7 @@ export function buildEnvironment(scene, renderer, theme, quality) {
   scene.add(group);
 
   // ---- sky dome (vertex-coloured, no texture) ----
-  const skyGeo = new THREE.SphereGeometry(760, 24, 16);
+  const skyGeo = new THREE.SphereGeometry(760, 20, 12);
   skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(skyGeo.attributes.position.count * 3), 3));
   const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
   sky.name = 'sky';
@@ -152,17 +156,17 @@ export function buildEnvironment(scene, renderer, theme, quality) {
   // ---- ground ----
   // 地面远大于天穹半径：地平线以下永远先命中地面（已被雾吃满），
   // 以上才是天穹，两者在雾色处相接，不会出现一条硬边。
-  const groundGeo = new THREE.PlaneGeometry(3000, 3000, 26, 26);
+  const groundGeo = new THREE.PlaneGeometry(3000, 3000, 18, 18);
   groundGeo.rotateX(-Math.PI / 2);
   const gp = groundGeo.attributes.position;
   const gc = new Float32Array(gp.count * 3);
+  const flatRadius = FORMATION.bottomWidth / 2 + 150; // 城区保持平整，楼不会悬空
   for (let i = 0; i < gp.count; i += 1) {
     const x = gp.getX(i);
     const z = gp.getZ(i);
-    const away = Math.min(1, Math.max(0, (Math.abs(x) - 13) / 40));
+    const away = Math.min(1, Math.max(0, (Math.abs(x - FORMATION.centerX) - flatRadius) / 60));
     const h = (Math.sin(x * 0.021) * Math.cos(z * 0.017) + Math.sin(x * 0.006 + 1.7) * 1.6) * 1.5 * away;
     gp.setY(i, h);
-    // 雪面明暗起伏：迎风坡亮、背风凹处暗，避免一整块死板的灰地板
     const drift = 0.82 + 0.3 * (0.5 + 0.5 * Math.sin(x * 0.05 + z * 0.031)) + 0.12 * Math.sin(z * 0.11);
     gc[i * 3] = drift;
     gc[i * 3 + 1] = drift;
@@ -190,14 +194,23 @@ export function buildEnvironment(scene, renderer, theme, quality) {
   ballast.receiveShadow = true;
   group.add(ballast);
 
-  // 铁路走廊：轨道两侧一片深色道砟/清雪带，把线路"压"在地上，
-  // 否则整片雪原和车体一样亮，画面没有明暗层次。
-  const corridor = new THREE.Mesh(
-    box(34, 0.06, span, 1.2, TRACK.groundY + 0.05, 0),
-    new THREE.MeshStandardMaterial({ color: theme.corridor, roughness: 0.98, metalness: 0 }),
+  // 填方路基：顶面承道砟与接触网杆，1:1.5 边坡落到周围地面，
+  // 取代原来那块 6 cm 厚的悬空薄板——从低机位看终于是一条坐在土上的线路。
+  const embankment = new THREE.Mesh(
+    prismGeometry(FORMATION.topWidth, FORMATION.bottomWidth, FORMATION.topY, FORMATION.bottomY, span, FORMATION.centerX),
+    new THREE.MeshStandardMaterial({ color: theme.embankment, roughness: 0.97, metalness: 0 }),
   );
-  corridor.receiveShadow = true;
-  group.add(corridor);
+  embankment.receiveShadow = true;
+  group.add(embankment);
+
+  // 基床表层级配碎石 + 两侧电缆槽，合并成一个 mesh 给路基顶面一条清晰的工程边界
+  const capGeos = [box(FORMATION.topWidth, FORMATION.capHeight, span, FORMATION.centerX, FORMATION.topY - FORMATION.capHeight / 2 + 0.01, 0)];
+  for (const tx of [FORMATION.centerX - FORMATION.topWidth / 2 + 0.45, FORMATION.centerX + FORMATION.topWidth / 2 - 0.45]) {
+    capGeos.push(box(0.7, 0.34, span, tx, FORMATION.topY + 0.1, 0));
+  }
+  const cap = new THREE.Mesh(mergeGeometries(capGeos), new THREE.MeshStandardMaterial({ color: theme.cap, roughness: 0.94, metalness: 0.02 }));
+  cap.receiveShadow = true;
+  group.add(cap);
 
   const railGeos = [];
   for (const cx of [0, TRACK.slab.offsetX]) {
@@ -256,7 +269,7 @@ export function buildEnvironment(scene, renderer, theme, quality) {
   group.add(messenger, droppers);
 
   // ---- lineside conifers ----
-  const treeCount = 36;
+  const treeCount = 28;
   const trees = new THREE.InstancedMesh(treeGeometry(), mats.tree, treeCount);
   const q = new THREE.Quaternion();
   const scale = new THREE.Vector3();
@@ -268,11 +281,10 @@ export function buildEnvironment(scene, renderer, theme, quality) {
   };
   for (let i = 0; i < treeCount; i += 1) {
     const side = i % 2 === 0 ? -1 : 1;
-    // 林木只放在远侧：镜头环绕半径最大 260 m，但常用机位在 100 m 内，
-    // 树带退到 62 m 以外才不会在侧向机位挡镜头。
-    const x = side * (92 + rnd() * 96);
+    // 路基坡脚与第一排楼之间的防护林带：不挡侧向机位，也不和楼群重叠
+    const x = FORMATION.centerX + side * (16.5 + rnd() * 8);
     const z = -half + (i / treeCount) * span + rnd() * 10;
-    const s = 0.45 + rnd() * 0.4;
+    const s = 0.5 + rnd() * 0.45;
     pos.set(x, TRACK.groundY - 0.1, z);
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * Math.PI);
     scale.set(s, s * (0.85 + rnd() * 0.4), s);
@@ -344,7 +356,8 @@ export function buildEnvironment(scene, renderer, theme, quality) {
     ground.material.color.setHex(t.ground);
     ground.material.roughness = t.groundRoughness;
     mats.ballast.color.setHex(t.ballast);
-    corridor.material.color.setHex(t.corridor);
+    embankment.material.color.setHex(t.embankment);
+    cap.material.color.setHex(t.cap);
     mats.sleeper.color.setHex(t.sleeper);
     mats.slab.color.setHex(t.slab);
     mats.rail.color.setHex(t.rail);

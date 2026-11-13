@@ -43,7 +43,8 @@ export const THEMES = {
     windowGlow: 0.07,
     lamps: true,
     wire: 0x5c5145,
-    corridor: 0x2b3340,
+    embankment: 0x39424e,
+    cap: 0x59616c,
     ballast: 0x3b3f47,
     sleeper: 0x2f2c29,
     slab: 0x555b64,
@@ -69,7 +70,8 @@ export const THEMES = {
     windowGlow: 0.02,
     lamps: true,
     wire: 0x5a5348,
-    corridor: 0x5a6470,
+    embankment: 0x6e7a86,
+    cap: 0x9aa4ae,
     ballast: 0x5a5f68,
     sleeper: 0x4a453f,
     slab: 0x8b929b,
@@ -95,7 +97,8 @@ export const THEMES = {
     windowGlow: 0.03,
     lamps: false,
     wire: 0x3a3d41,
-    corridor: 0x2a2a2e,
+    embankment: 0x2e2e33,
+    cap: 0x4a4a50,
     ballast: 0x4a4a52,
     sleeper: 0x3d3a36,
     slab: 0x6b6b73,
@@ -114,7 +117,27 @@ export const TRACK = {
   ballast: { top: 3.7, bottom: 6.6, height: 0.36, y: -0.5 },
   slab: { offsetX: 5.0, width: 3.0, height: 0.3 },
   rail: { width: 0.075, height: 0.17 },
-  groundY: -0.68,
+  // 路基面（道砟落在这里）与周围地面分开：线路坐在填方路基上，不再是一块悬空薄板
+  formationY: -0.68,
+  groundY: -3.4,
+};
+
+// 填方路基：顶宽承两条线路+接触网杆，边坡按 1:1.5 放坡落到地面
+export const FORMATION = {
+  centerX: 2.0,
+  topWidth: 13.6,
+  bottomWidth: 22.0,
+  topY: -0.68,
+  bottomY: -3.4,
+  capHeight: 0.22,
+};
+
+export const CITY = {
+  period: 115, // 楼群沿 z 的重复周期，滚动按它取模即可无缝
+  blocks: 4,
+  rows: [58, 100, 150], // 距线路中心的退距：近排住宅、中排混合、远排高层；留出镜头环绕的空廊
+  cols: 3,
+  groundY: -3.4,
 };
 
 export const CATENARY = {

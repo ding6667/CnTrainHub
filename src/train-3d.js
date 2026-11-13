@@ -690,6 +690,9 @@ function liveryTexture(kind, variant, palette, label) {
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // 画布第 0 行直接对应 v=0（车顶）。默认的 flipY 会把上下半张对调，
+  // 左右侧文字就会跑到反侧并被镜像。
+  tex.flipY = false;
   tex.anisotropy = 8;
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;

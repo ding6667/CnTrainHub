@@ -15,9 +15,11 @@ const RANGES = [
   ['snow', 'snow', (v) => `${v.toFixed(0)}%`],
   ['fog', 'fog', (v) => `${v.toFixed(1)}‰`],
   ['exposure', 'exposure', (v) => v.toFixed(2)],
+  ['density', 'density', (v) => `${v.toFixed(0)}%`],
+  ['skyline', 'skyline', (v) => `${v.toFixed(0)}%`],
 ];
 
-const TOGGLES = ['auto', 'panto', 'lamps', 'catenary', 'slab', 'trees', 'wire'];
+const TOGGLES = ['auto', 'panto', 'lamps', 'catenary', 'slab', 'trees', 'city', 'wire'];
 const SELECTS = [['view', 'view'], ['theme', 'theme'], ['quality', 'quality']];
 
 export function bindUI(api) {

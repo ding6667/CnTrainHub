@@ -4,6 +4,7 @@ import MODELS from './data.json';
 import { MOTION, CAMERA, VIEWS, THEMES, QUALITY } from './detail-config.js';
 import { buildTrain } from './train-3d.js';
 import { buildEnvironment, makeEnvironment } from './detail-scene.js';
+import { buildCity } from './detail-city.js';
 import { createAudio } from './detail-audio.js';
 import { bindUI } from './detail-ui.js';
 import './detail.css';
@@ -105,6 +106,9 @@ function boot(cfg) {
     catenary: true,
     slab: true,
     trees: true,
+    city: true,
+    density: 100,
+    skyline: 100,
     wire: false,
     quality: 'mid',
     car: 0,
@@ -120,6 +124,7 @@ function boot(cfg) {
   scene.environment = envRT.texture;
 
   const env = buildEnvironment(scene, renderer, theme, S.quality);
+  const city = buildCity(scene, theme);
   const train = buildTrain(cfg);
   scene.add(train.group);
 
@@ -268,6 +273,7 @@ function boot(cfg) {
     S.exposure = theme.exposure;
     S.lamps = theme.lamps;
     env.applyTheme(theme);
+    city.applyTheme(theme);
     const old = envRT;
     envRT = makeEnvironment(renderer, theme);
     scene.environment = envRT.texture;
@@ -373,6 +379,7 @@ function boot(cfg) {
     travel += velocity * dt;
 
     env.scroll(travel);
+    city.scroll(travel);
     env.update(dt, velocity, controls.target, elapsed);
 
     if (S.auto && !dragging && !tween.active) {
@@ -490,6 +497,15 @@ function boot(cfg) {
         case 'trees':
           env.setTrees(value);
           break;
+        case 'city':
+          city.setVisible(value);
+          break;
+        case 'density':
+          city.setDensity(value / 100);
+          break;
+        case 'skyline':
+          city.setHeight(value / 100);
+          break;
         case 'wire':
           train.setWireframe(value);
           renderer.shadowMap.needsUpdate = true;
@@ -513,6 +529,9 @@ function boot(cfg) {
       env.setCatenary(true);
       env.setSlabTrack(true);
       env.setTrees(true);
+      city.setVisible(true);
+      city.setDensity(1);
+      city.setHeight(1);
       applyLamps();
       cam.fov = effectiveFov();
       cam.updateProjectionMatrix();
