@@ -15,6 +15,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         detail: fileURLToPath(new URL('./detail.html', import.meta.url)),
+        journey: fileURLToPath(new URL('./journey.html', import.meta.url)),
       },
     },
   },

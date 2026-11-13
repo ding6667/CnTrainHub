@@ -285,6 +285,9 @@ body {
   gap: 8px;
 }
 
+/* 顶栏里当链接用的按钮，去掉下划线并与相邻按钮对齐 */
+.btn-link { text-decoration: none; display: inline-flex; align-items: center; }
+
 .btn {
   font: inherit;
   font-size: 12px;
