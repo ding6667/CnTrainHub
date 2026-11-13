@@ -551,7 +551,9 @@ function liveryTexture(kind, variant, palette, label) {
 
   // 龙凤呈祥飘带先画：波峰拱到窗带之上，随后黑窗带盖住带内部分，
   // 窗带上下露出飘带，玻璃网格再叠在窗带之上保证车窗可见。
-  if (palette === 'dragon') dragonRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W, variant ? Math.PI : 0);
+  // 每节车一个完整正弦周期（0..2π）；实车波峰在车头/车厢前四分之一处，
+  // 故基准相位取 π（sin 正半周在画布上是向下的波谷），交替车再反相。
+  if (palette === 'dragon') dragonRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W, variant ? 0 : Math.PI);
 
   // 黑色窗带
   ctx.fillStyle = P.ink;
