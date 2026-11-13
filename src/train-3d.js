@@ -467,33 +467,38 @@ function bandGradient(ctx, y0, y1, light, dark) {
   return g;
 }
 
-/** 龙凤呈祥：红金双色飘带，一节车一个波峰一个波谷，带流星尾焰式分支。 */
+/** 龙凤呈祥：红金飘带的波峰要拱到车窗上沿之上（实车上边界高于窗带），
+ *  波谷落到裙板上方。先画飘带再盖黑窗带，窗带内保持黑、窗带上下露出飘带。 */
 function dragonRibbons(ctx, P, x0, x1, phase) {
-  const top = yPx(2.04);
+  const top = yPx(3.5);
   const bot = yPx(1.0);
   ctx.save();
   ctx.beginPath();
   ctx.rect(x0, top, x1 - x0, bot - top);
   ctx.clip();
 
-  const mid = (top + bot) / 2 + 4;
+  const mid = yPx(2.1);
+  const M = PX_PER_M;
   const span = x1 - x0;
   const u = (t) => x0 + span * t;
 
-  ribbon(ctx, x0, x1, mid - 34, 26, 8, phase + 0.9, 1, P.goldDeep, 0.06);
-  ribbon(ctx, x0, x1, mid - 26, 31, 17, phase + 0.45, 1, bandGradient(ctx, top, bot, P.gold, P.goldDeep), 0.04);
-  ribbon(ctx, x0, x1, mid + 2, 34, 74, phase, 1, bandGradient(ctx, top, bot, P.redLight, P.redDeep), 0.025);
-  ribbon(ctx, x0, x1, mid + 30, 27, 16, phase - 0.5, 1, P.red, 0.07);
-  ribbon(ctx, x0, x1, mid + 42, 22, 6, phase - 0.95, 1, P.goldDeep, 0.12);
+  // 主红带：波峰上边界拱到车窗上沿之上，波谷压到裙板上沿
+  ribbon(ctx, x0, x1, mid, 0.85 * M, 0.9 * M, phase, 1, bandGradient(ctx, top, bot, P.redLight, P.redDeep), 0.025);
+  // 金飘带贴着红带波峰上缘平行扫过，整体高于车窗（画布 y 向下，故用负偏移）
+  ribbon(ctx, x0, x1, mid - 0.45 * M, 0.85 * M, 0.2 * M, phase, 1, bandGradient(ctx, top, bot, P.gold, P.goldDeep), 0.04);
+  ribbon(ctx, x0, x1, mid - 0.62 * M, 0.85 * M, 0.08 * M, phase, 1, P.goldDeep, 0.06);
+  // 下缘分支与金细丝
+  ribbon(ctx, x0, x1, mid + 0.6 * M, 0.6 * M, 0.16 * M, phase - 0.5, 1, P.red, 0.07);
+  ribbon(ctx, x0, x1, mid + 0.8 * M, 0.5 * M, 0.08 * M, phase - 0.95, 1, P.goldDeep, 0.12);
 
-  // 尾焰分支：从主带波峰甩出去的两道细红丝
+  // 尾焰分支：从主带波峰甩出去、拱过窗带的两道细红丝
   ctx.strokeStyle = P.red;
   ctx.lineCap = 'round';
   for (const [t0, dir] of [[0.18, -1], [0.72, 1]]) {
     ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.moveTo(u(t0), mid + 2 + 34 * Math.sin(Math.PI * 2 * t0 + phase));
-    ctx.quadraticCurveTo(u(t0 + 0.1 * dir), mid - 30, u(t0 + 0.24 * dir), mid - 38);
+    ctx.moveTo(u(t0), mid + 0.75 * M * Math.sin(Math.PI * 2 * t0 + phase));
+    ctx.quadraticCurveTo(u(t0 + 0.1 * dir), mid - 0.5 * M, u(t0 + 0.24 * dir), mid - 0.95 * M);
     ctx.stroke();
   }
   ctx.restore();
@@ -544,6 +549,10 @@ function liveryTexture(kind, variant, palette, label) {
   const bandBot = yPx(2.06);
   const noseEnd = isHead ? uPx(-length / 2 + DIM.noseLength) : 0;
 
+  // 龙凤呈祥飘带先画：波峰拱到窗带之上，随后黑窗带盖住带内部分，
+  // 窗带上下露出飘带，玻璃网格再叠在窗带之上保证车窗可见。
+  if (palette === 'dragon') dragonRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W, variant ? Math.PI : 0);
+
   // 黑色窗带
   ctx.fillStyle = P.ink;
   ctx.fillRect(noseEnd, bandTop, TEX_W - noseEnd, bandBot - bandTop);
@@ -572,8 +581,7 @@ function liveryTexture(kind, variant, palette, label) {
     ctx.strokeRect(uPx(z - 0.26), yPx(3.0), uPx(z + 0.26) - uPx(z - 0.26), yPx(2.32) - yPx(3.0));
   }
 
-  if (palette === 'dragon') dragonRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W, variant ? Math.PI : 0);
-  else phoenixRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W);
+  if (palette !== 'dragon') phoenixRibbons(ctx, P, isHead ? noseEnd * 0.42 : 0, TEX_W);
 
   if (isHead) {
     const canopyEdge = [
