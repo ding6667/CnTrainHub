@@ -1098,7 +1098,7 @@ function showCard(kind, rec, latlng) {
   card.classList.toggle('card--wide', kind === 'bureau');
   card.setAttribute('aria-hidden', 'false');
   card.querySelector('.card-close').addEventListener('click', hideCard);
-  // Rows for models that have a GLB jump to the 3D showcase page.
+  // Rows for models that have a 3D builder jump to the showcase page.
   for (const row of card.querySelectorAll('[data-detail]')) {
     const go = () => {
       location.href = `detail.html?model=${encodeURIComponent(row.dataset.detail)}`;

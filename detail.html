@@ -2,29 +2,196 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CR400BF-G · 3D 展示 · CnTrainHub</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#060a10" />
+    <title>CR400BF-GZ · 3D 展示 · CnTrainHub</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a1a'/%3E%3Cpath d='M6 20h20M8 20V11a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v9' stroke='%23e63946' stroke-width='2.4' fill='none'/%3E%3Ccircle cx='11' cy='23.5' r='2' fill='%23457b9d'/%3E%3Ccircle cx='21' cy='23.5' r='2' fill='%23457b9d'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060a10'/%3E%3Cpath d='M5 21h22M8 21V12a3 3 0 0 1 3-3h9l5 6v6' stroke='%23d21f26' stroke-width='2.2' fill='none' stroke-linejoin='round'/%3E%3Cpath d='M6 24h20' stroke='%23e3a63a' stroke-width='1.6'/%3E%3C/svg%3E"
     />
   </head>
   <body>
     <canvas id="stage"></canvas>
+    <div id="grain" aria-hidden="true"></div>
+    <div id="vignette" aria-hidden="true"></div>
 
-    <a id="back" href="./index.html">← 返回路网</a>
+    <header id="topbar">
+      <a id="back" href="./index.html">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        路网
+      </a>
+      <div id="ident">
+        <h1 id="hud-name">CR400BF-GZ</h1>
+        <p id="hud-sub">哈尔滨局 · 复兴号高寒智能动车组</p>
+      </div>
+      <div id="topright">
+        <span id="livery-tag">龙凤呈祥</span>
+        <button id="sound" type="button" aria-pressed="true" title="环境音开关">
+          <svg class="ico-on" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8h3l4-3.5v11L7 12H4z" fill="currentColor"/><path d="M13.4 7.2a4 4 0 0 1 0 5.6M15.6 5a7 7 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <svg class="ico-off" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 8h3l4-3.5v11L7 12H4z" fill="currentColor"/><path d="m13.5 7.5 4 5m0-5-4 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span id="sound-label">环境音</span>
+        </button>
+      </div>
+    </header>
 
-    <div id="hud">
-      <h1 id="hud-name">CR400BF-G</h1>
-      <p id="hud-sub">哈尔滨局 · 复兴号高寒动车组</p>
+    <aside id="dock" aria-label="展示控制台">
+      <div class="dock-scroll">
+        <section class="grp">
+          <h2>运行</h2>
+          <div class="row">
+            <label for="c-speed">演示速度</label>
+            <output id="o-speed">108 km/h</output>
+            <input id="c-speed" type="range" min="0" max="160" step="2" value="108" />
+          </div>
+          <div class="row">
+            <label for="c-accel">加速度</label>
+            <output id="o-accel">2.6 m/s²</output>
+            <input id="c-accel" type="range" min="0.6" max="8" step="0.2" value="2.6" />
+          </div>
+          <div class="consist" id="consist" role="group" aria-label="编组，点击定位到某节车"></div>
+        </section>
+
+        <section class="grp">
+          <h2>机位</h2>
+          <div class="row">
+            <label for="c-view">预设机位</label>
+            <select id="c-view"></select>
+          </div>
+          <div class="row">
+            <label for="c-azim">环绕角</label>
+            <output id="o-azim">132°</output>
+            <input id="c-azim" type="range" min="-180" max="180" step="1" value="132" />
+          </div>
+          <div class="row">
+            <label for="c-dist">距离</label>
+            <output id="o-dist">42 m</output>
+            <input id="c-dist" type="range" min="9" max="260" step="1" value="42" />
+          </div>
+          <div class="row">
+            <label for="c-height">机位高度</label>
+            <output id="o-height">9.5 m</output>
+            <input id="c-height" type="range" min="0.6" max="60" step="0.2" value="9.5" />
+          </div>
+          <div class="row">
+            <label for="c-fov">视野</label>
+            <output id="o-fov">42°</output>
+            <input id="c-fov" type="range" min="20" max="75" step="1" value="42" />
+          </div>
+          <div class="row switch">
+            <label for="c-auto">自动环绕</label>
+            <input id="c-auto" type="checkbox" class="tgl" />
+          </div>
+        </section>
+
+        <section class="grp">
+          <h2>光照与天气</h2>
+          <div class="row">
+            <label for="c-theme">场景主题</label>
+            <select id="c-theme">
+              <option value="day" selected>雪昼</option>
+              <option value="night">寒夜</option>
+              <option value="studio">影棚</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="c-key">主光强度</label>
+            <output id="o-key">1.70</output>
+            <input id="c-key" type="range" min="0" max="5" step="0.05" value="1.7" />
+          </div>
+          <div class="row">
+            <label for="c-keydir">主光方位</label>
+            <output id="o-keydir">-52°</output>
+            <input id="c-keydir" type="range" min="-180" max="180" step="1" value="-52" />
+          </div>
+          <div class="row">
+            <label for="c-rim">轮廓光</label>
+            <output id="o-rim">1.20</output>
+            <input id="c-rim" type="range" min="0" max="5" step="0.05" value="1.2" />
+          </div>
+          <div class="row">
+            <label for="c-snow">雪量</label>
+            <output id="o-snow">45%</output>
+            <input id="c-snow" type="range" min="0" max="100" step="1" value="45" />
+          </div>
+          <div class="row">
+            <label for="c-fog">雾浓度</label>
+            <output id="o-fog">4.2‰</output>
+            <input id="c-fog" type="range" min="0" max="16" step="0.2" value="4.2" />
+          </div>
+          <div class="row">
+            <label for="c-exposure">曝光</label>
+            <output id="o-exposure">0.95</output>
+            <input id="c-exposure" type="range" min="0.4" max="2" step="0.02" value="0.95" />
+          </div>
+        </section>
+
+        <section class="grp">
+          <h2>显示</h2>
+          <div class="row switch"><label for="c-panto">升弓</label><input id="c-panto" type="checkbox" class="tgl" checked /></div>
+          <div class="row switch"><label for="c-lamps">车灯</label><input id="c-lamps" type="checkbox" class="tgl" checked /></div>
+          <div class="row switch"><label for="c-catenary">接触网</label><input id="c-catenary" type="checkbox" class="tgl" checked /></div>
+          <div class="row switch"><label for="c-slab">邻线无砟轨道</label><input id="c-slab" type="checkbox" class="tgl" checked /></div>
+          <div class="row switch"><label for="c-trees">沿线林木</label><input id="c-trees" type="checkbox" class="tgl" checked /></div>
+          <div class="row switch"><label for="c-wire">线框模式</label><input id="c-wire" type="checkbox" class="tgl" /></div>
+          <div class="row">
+            <label for="c-quality">画质</label>
+            <select id="c-quality">
+              <option value="low">流畅</option>
+              <option value="mid" selected>均衡</option>
+              <option value="high">精细</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="grp">
+          <h2>动作</h2>
+          <div class="acts">
+            <button id="a-reset" type="button">重置</button>
+            <button id="a-random" type="button">随机</button>
+            <button id="a-export" type="button" class="primary">导出 PNG</button>
+          </div>
+          <p class="stat" id="stat">—</p>
+        </section>
+      </div>
+    </aside>
+
+    <div id="console">
+      <div id="gauge">
+        <div id="gauge-num"><span id="kmh">0</span><em>km/h</em></div>
+        <div id="gauge-bar"><i id="gauge-fill"></i></div>
+        <div id="gauge-meta"><span id="odo">0.00 km</span><span id="state">停车</span></div>
+      </div>
+      <button id="run" type="button">
+        <span class="dot"></span><span id="run-label">前进</span>
+      </button>
+      <p id="hint">拖动旋转 · 滚轮缩放 · 空格启停</p>
     </div>
 
-    <button id="run" type="button">前进</button>
-    <p id="hint">按住鼠标中键拖动可绕车头旋转视角，滚轮缩放</p>
+    <dl id="specs">
+      <div><dt>编组</dt><dd id="sp-cars">8 辆</dd></div>
+      <div><dt>全长</dt><dd id="sp-len">208.95 m</dd></div>
+      <div><dt>构造速度</dt><dd id="sp-speed">350 km/h</dd></div>
+      <div><dt>车体</dt><dd>3.36 × 4.05 m</dd></div>
+    </dl>
+
+    <div id="loader">
+      <div class="ldr-mark">
+        <svg viewBox="0 0 120 40" aria-hidden="true">
+          <path d="M4 30h112M10 30V16a5 5 0 0 1 5-5h58l24 12v7" fill="none" stroke="#d21f26" stroke-width="2.4" stroke-linejoin="round"/>
+          <path d="M6 34h108" stroke="#e3a63a" stroke-width="1.8"/>
+        </svg>
+      </div>
+      <p id="loader-msg">正在生成车体与涂装…</p>
+      <div class="ldr-bar"><i></i></div>
+    </div>
 
     <div id="fallback" hidden>
-      <p id="fallback-msg"></p>
-      <a href="./index.html">返回路网模型列表</a>
+      <div class="fb-card">
+        <h2 id="fallback-title">无法展示该车型</h2>
+        <p id="fallback-msg"></p>
+        <div id="fallback-list"></div>
+        <a href="./index.html">返回路网模型列表</a>
+      </div>
     </div>
 
     <script type="module" src="/src/detail.js"></script>

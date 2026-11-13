@@ -4,11 +4,13 @@
     "railway": "哈尔滨局",
     "formation": 8,
     "maxSpeed": 350,
-    "color": "#c0c0c0",
-    "accent": "#e11d2a",
-    "model": "/models/CR400BF-G.glb",
+    "color": "#e8ebee",
+    "accent": "#c9a227",
+    "model": "cr400bf",
+    "livery": "phoenix",
+    "liveryName": "金凤凰",
     "title": "复兴号高寒动车组",
-    "note": "俗称“金凤凰”高寒版，8 辆编组，车体长 208.95 m、宽 3.36 m、高 4.05 m。",
+    "note": "俗称“金凤凰”高寒版，8 辆编组，车体长 208.95 m、宽 3.36 m、高 4.05 m；金色腰线涂装，3D 车体由 Three.js 程序化生成。",
     "set": {
       "headLength": 25.85,
       "middleLength": 25.0,
@@ -21,21 +23,37 @@
     "railway": "哈尔滨局",
     "formation": 8,
     "maxSpeed": 350,
-    "color": "#c0c0c0",
-    "accent": "#e11d2a",
-    "model": null,
+    "color": "#dfe4e9",
+    "accent": "#d21f26",
+    "model": "cr400bf",
+    "livery": "dragon",
+    "liveryName": "龙凤呈祥",
     "title": "复兴号高寒智能动车组",
-    "note": "高寒智能型，8 辆编组。3D 模型待建。"
+    "note": "在 CR400BF-Z 智能平台基础上研制的高寒型，耐高寒抗风沙，2021 年 6 月 25 日投入京哈高铁。银灰金属漆车身配“国旗红 / 故宫红 / 祥龙黄”三色凤尾飘带，金色立体“复兴号”标识，8 辆编组全长 208.95 m。",
+    "set": {
+      "headLength": 25.85,
+      "middleLength": 25.0,
+      "gap": 1.036,
+      "setLength": 208.95
+    }
   },
   "CR400BF-GS": {
     "name": "CR400BF-GS",
     "railway": "哈尔滨局",
     "formation": 8,
     "maxSpeed": 350,
-    "color": "#c0c0c0",
-    "accent": "#e11d2a",
-    "model": null,
+    "color": "#e8ebee",
+    "accent": "#cf8b32",
+    "model": "cr400bf",
+    "livery": "phoenix",
+    "liveryName": "金凤凰",
     "title": "复兴号高寒技术提升型动车组",
-    "note": "高寒技术提升型，8 辆编组。3D 模型待建。"
+    "note": "高寒技术提升型，8 辆编组；与 G 共用 CR400BF 高寒平台几何与金凤凰涂装。",
+    "set": {
+      "headLength": 25.85,
+      "middleLength": 25.0,
+      "gap": 1.036,
+      "setLength": 208.95
+    }
   }
 }

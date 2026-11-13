@@ -1,55 +1,134 @@
-export const SCENE = {
-  background: 0x252525,
-  fogColor: 0x252525,
-  fogDensity: 0.0068,
-  ground: 0x1e1e22,
-};
-
-export const LIGHTS = {
-  hemi: { sky: 0x888888, ground: 0x333333, intensity: 0.8 },
-  dir: {
-    color: 0xffffff,
-    intensity: 1.0,
-    position: [42, 56, 26],
-    // 1024 covers the whole 209 m set at ~8 px/m, which is enough for a contact
-    // shadow; 2048 measured ~40% slower under software rasterization.
-    shadowMap: 1024,
-    shadowExtent: 130,
-  },
-};
-
 export const MOTION = {
-  maxSpeed: 30, // m/s
-  acceleration: 2, // m/s^2
-  deceleration: 3, // m/s^2
+  maxSpeed: 44.5, // m/s ≈ 160 km/h，演示速度上限（枕木间距 0.62 m 再快就频闪）
+  acceleration: 2.6,
+  deceleration: 3.4,
+  defaultKmh: 108,
 };
 
 export const CAMERA = {
-  fov: 45,
-  near: 0.5,
-  far: 1200,
-  startOffset: [34, 11, -30],
-  minDistance: 14,
-  maxDistance: 220,
+  fov: 42,
+  near: 0.4,
+  far: 1600,
+  minDistance: 9,
+  maxDistance: 260,
+  focusY: 2.2,
+};
+
+// 机位预设：offset 相对车头焦点，focus 'head' | 'set'
+export const VIEWS = [
+  { id: 'hero', label: '英雄机位', offset: [30, 9.5, -27], focus: 'head' },
+  { id: 'nose', label: '鼻锥特写', offset: [11.5, 3.4, -14], focus: 'head' },
+  { id: 'side', label: '侧向平视', offset: [38, 3.0, 4], focus: 'head' },
+  { id: 'bogie', label: '转向架', offset: [8.5, 1.35, -6.5], focus: 'head' },
+  { id: 'roof', label: '俯瞰受电弓', offset: [13, 26, 16], focus: 'head' },
+  { id: 'set', label: '全列纵览', offset: [96, 34, -70], focus: 'set' },
+  { id: 'rear', label: '尾车回望', offset: [24, 7.5, 52], focus: 'head' },
+];
+
+export const THEMES = {
+  night: {
+    label: '寒夜',
+    sky: [0x05080e, 0x121e2e, 0x2a3a4e],
+    fog: 0x121d2b,
+    fogDensity: 0.0062,
+    ground: 0x46596e,
+    groundRoughness: 0.82,
+    hemi: { sky: 0x3d5a80, ground: 0x141a22, intensity: 0.55 },
+    key: { color: 0xffd2a1, intensity: 1.95, azimuth: -0.62, elevation: 0.34 },
+    rim: { color: 0x74b6ff, intensity: 2.4, azimuth: 2.5, elevation: 0.22 },
+    env: { zenith: '#050a14', horizon: '#2c4763', glow: '#ffb877', ground: '#161d26', sun: 0.32 },
+    envIntensity: 0.85,
+    exposure: 1.06,
+    snow: 0.7,
+    windowGlow: 0.07,
+    lamps: true,
+    wire: 0x5c5145,
+    corridor: 0x2b3340,
+    ballast: 0x3b3f47,
+    sleeper: 0x2f2c29,
+    slab: 0x555b64,
+    rail: 0xa8b0b8,
+    mast: 0x4c525a,
+    tree: 0x1e2a33,
+    treeSnow: 0xc6d6e4,
+  },
+  day: {
+    label: '雪昼',
+    sky: [0x2c4666, 0x6d8bab, 0xa8bdd0],
+    fog: 0xa8bdd0,
+    fogDensity: 0.0042,
+    ground: 0xa9bccd,
+    groundRoughness: 0.9,
+    hemi: { sky: 0x93aec8, ground: 0x55606c, intensity: 0.7 },
+    key: { color: 0xffeed4, intensity: 1.7, azimuth: -0.9, elevation: 0.62 },
+    rim: { color: 0x9dc0e4, intensity: 1.2, azimuth: 2.2, elevation: 0.4 },
+    env: { zenith: '#3d5f88', horizon: '#a8bdd0', glow: '#ffe9c8', ground: '#7d8e9e', sun: 0.55 },
+    envIntensity: 0.8,
+    exposure: 0.95,
+    snow: 0.45,
+    windowGlow: 0.02,
+    lamps: true,
+    wire: 0x5a5348,
+    corridor: 0x5a6470,
+    ballast: 0x5a5f68,
+    sleeper: 0x4a453f,
+    slab: 0x8b929b,
+    rail: 0xc2cad2,
+    mast: 0x6b727a,
+    tree: 0x2f4038,
+    treeSnow: 0xf2f7fb,
+  },
+  studio: {
+    label: '影棚',
+    sky: [0x1c1c1c, 0x252525, 0x2e2e2e],
+    fog: 0x252525,
+    fogDensity: 0.0068,
+    ground: 0x1e1e22,
+    groundRoughness: 0.95,
+    hemi: { sky: 0x888888, ground: 0x333333, intensity: 0.8 },
+    key: { color: 0xffffff, intensity: 1.0, azimuth: -0.54, elevation: 0.78 },
+    rim: { color: 0xffffff, intensity: 0.0, azimuth: 2.5, elevation: 0.3 },
+    env: { zenith: '#1a1a1a', horizon: '#3a3a3a', glow: '#5a5a5a', ground: '#141414', sun: 0.2 },
+    envIntensity: 0.5,
+    exposure: 1.0,
+    snow: 0,
+    windowGlow: 0.03,
+    lamps: false,
+    wire: 0x3a3d41,
+    corridor: 0x2a2a2e,
+    ballast: 0x4a4a52,
+    sleeper: 0x3d3a36,
+    slab: 0x6b6b73,
+    rail: 0x9aa0a6,
+    mast: 0x5a5f66,
+    tree: 0x252525,
+    treeSnow: 0x2e2e2e,
+  },
 };
 
 export const TRACK = {
   gauge: 1.435,
   sleeperSpacing: 0.62,
   sleeperSize: [2.7, 0.16, 0.28],
-  span: 460, // geometric length; the scroll wraps by one spacing so it reads infinite
-  ballast: { width: 3.7, height: 0.36, color: 0x4a4a52 },
-  slab: { offsetX: 5.0, width: 3.0, height: 0.3, color: 0x6b6b73 },
-  rail: { width: 0.08, height: 0.16, color: 0x9aa0a6 },
-  groundY: 0,
+  span: 460,
+  ballast: { top: 3.7, bottom: 6.6, height: 0.36, y: -0.5 },
+  slab: { offsetX: 5.0, width: 3.0, height: 0.3 },
+  rail: { width: 0.075, height: 0.17 },
+  groundY: -0.68,
 };
 
 export const CATENARY = {
   spacing: 20,
   mastHeight: 8.4,
-  mastRadius: 0.16,
-  armLength: 3.4,
-  wireHeight: 5.4,
-  color: 0x5a5f66,
-  offsetX: -3.1,
+  mastRadius: 0.17,
+  armLength: 3.5,
+  contactY: 5.4,
+  messengerY: 6.62,
+  offsetX: -3.15,
 };
+
+export const QUALITY = [
+  { id: 'low', label: '流畅', ratio: 0.75, shadow: 512, snowCap: 700 },
+  { id: 'mid', label: '均衡', ratio: 1, shadow: 1024, snowCap: 1600 },
+  { id: 'high', label: '精细', ratio: 1.5, shadow: 2048, snowCap: 2600 },
+];

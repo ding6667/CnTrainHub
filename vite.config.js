@@ -3,10 +3,9 @@ import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   base: './',
-  // Map data is imported (and code-split) by src/main.js rather than fetched, so
-  // it resolves correctly under sub-path deployments and SPA fallback hosts.
-  // public/ is back on because the 3D showcase loads a .glb by URL.
-  publicDir: 'public',
+  // 地图数据与 3D 车体都由打包 import 生成，没有任何运行时静态资产，
+  // 所以关掉 publicDir：子路径部署和 SPA 回源主机上都不会有路径歧义。
+  publicDir: false,
   server: { host: true, port: 5173 },
   build: {
     outDir: 'dist',
