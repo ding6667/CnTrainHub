@@ -12,7 +12,7 @@ const DIM = {
   gap: 1.036,
   floorY: 0.94,
   roofY: 4.05,
-  noseLength: 9.9,
+  noseLength: 9.2,
   halfWidth: 1.68,
 };
 
@@ -62,10 +62,12 @@ function sectionAt(z, length, isHead) {
   }
   const d = z + length / 2;
   const t = clamp01(d / DIM.noseLength);
-  // 宽度按 t^0.78 收，高度按 t^1.5 抬：鼻尖压低拉长，风挡后段才快速溜上车顶。
-  const sx = 0.13 + 0.87 * Math.pow(t, 0.78);
-  const topY = 1.45 + (DIM.roofY - 1.45) * Math.pow(t, 1.5);
-  const botY = DIM.floorY + 0.1 * Math.pow(1 - t, 2.2);
+  // 参考实车：平面是饱满的圆钝楔形（宽度早早鼓起、鼻尖收成宽圆弧），
+  // 侧影是自鼻尖就上拱的平滑凸弧——不是细长针状鸟嘴。
+  const arc = Math.sin((t * Math.PI) / 2);
+  const sx = 0.34 + 0.66 * Math.pow(arc, 0.8);
+  const topY = 1.2 + (DIM.roofY - 1.2) * Math.pow(arc, 1.05);
+  const botY = 0.82 + 0.12 * t;
   return { sx, topY, botY };
 }
 
@@ -159,10 +161,10 @@ function buildCanopyGeometry(length) {
 
   for (let s = 0; s <= rows; s += 1) {
     const t = s / rows;
-    const z = -length / 2 + 0.42 + 8.1 * Math.pow(t, 1.15);
+    const z = -length / 2 + 0.35 + 7.0 * Math.pow(t, 1.1);
     const sec = sectionAt(z, length, true);
-    // 右半 0..6 号截面点，后段向车顶中心收拢
-    const span = 6 * (1 - Math.pow(t, 1.7)) + 0.35;
+    // 前缘盖满整个鼻锥顶，后缘收成一条横跨车顶的宽弧（实车风挡后缘是横向的，不是尖尾）
+    const span = 6 - 3 * Math.pow(t, 1.5);
     for (let c = 0; c < cols; c += 1) {
       const j = c <= 6 ? c : cols - 1 - c;
       const sign = c <= 6 ? 1 : -1;
@@ -575,11 +577,11 @@ function liveryTexture(kind, variant, palette, label) {
 
   if (isHead) {
     const canopyEdge = [
-      [0, yPx(1.42)],
-      [TEX_W * 0.09, yPx(1.78)],
-      [TEX_W * 0.2, yPx(2.34)],
-      [TEX_W * 0.3, yPx(2.95)],
-      [noseEnd * 0.97, PX_SHOULDER],
+      [0, yPx(1.5)],
+      [TEX_W * 0.08, yPx(1.95)],
+      [TEX_W * 0.16, yPx(2.5)],
+      [TEX_W * 0.24, yPx(3.1)],
+      [noseEnd * 0.82, PX_SHOULDER],
     ];
     const trace = () => {
       ctx.beginPath();
@@ -594,8 +596,8 @@ function liveryTexture(kind, variant, palette, label) {
 
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(noseEnd * 0.97, 0);
-    ctx.lineTo(noseEnd * 0.97, PX_SHOULDER);
+    ctx.lineTo(noseEnd * 0.82, 0);
+    ctx.lineTo(noseEnd * 0.82, PX_SHOULDER);
     for (let i = canopyEdge.length - 2; i >= 0; i -= 1) {
       const [x, y] = canopyEdge[i];
       const [px, py] = canopyEdge[i + 1];
