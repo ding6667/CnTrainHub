@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { buildFamilyTrain } from './train-families.js';
 
 /**
  * CR400BF 高寒平台车体。局部坐标：+Y 上，鼻锥朝 -Z，轨顶面 y = 0。
  * 涂装画在 CanvasTexture 上，v 按车体高度分段映射，把像素预算集中在侧墙。
+ * 其余平台（CRH5 / CRH380B / CR200J）在 train-families.js 里单独建模。
  */
 
 const DIM = {
@@ -733,6 +735,7 @@ function liveryTexture(kind, variant, palette, label) {
 // ----------------------------------------------------------------- train ---
 
 export function buildTrain(cfg) {
+  if (cfg.model && cfg.model !== 'cr400bf') return buildFamilyTrain(cfg);
   const headLen = cfg.set?.headLength ?? DIM.headLength;
   const midLen = cfg.set?.middleLength ?? DIM.middleLength;
   const gap = cfg.set?.gap ?? DIM.gap;

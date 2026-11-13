@@ -56,6 +56,7 @@ function boot(cfg) {
   document.getElementById('sp-cars').textContent = `${cfg.formation} 辆`;
   document.getElementById('sp-len').textContent = `${cfg.set.setLength.toFixed(2)} m`;
   document.getElementById('sp-speed').textContent = `${cfg.maxSpeed} km/h`;
+  document.getElementById('sp-body').textContent = cfg.bodySize ?? '3.36 × 4.05 m';
 
   // ------------------------------------------------------------ renderer ---
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -125,6 +126,9 @@ function boot(cfg) {
 
   const env = buildEnvironment(scene, renderer, theme, S.quality);
   const city = buildCity(scene, theme);
+  // 全列纵览把镜头拉到线路侧后方，近排楼群会挡住整列车；该机位临时隐藏楼群
+  const applyCityVisibility = () => city.setVisible(S.city && S.view !== 'set');
+  applyCityVisibility();
   const train = buildTrain(cfg);
   scene.add(train.group);
 
@@ -149,18 +153,20 @@ function boot(cfg) {
   scene.add(pool);
 
   // -------------------------------------------------------------- camera ---
-  const carCenters = [];
-  {
+  // 车长不一致的车型（如动力集中 CR200J 的动力车/拖车/控制车）由构建器直接给中心点
+  const carCenters = train.carCenters ?? (() => {
     const headLen = cfg.set.headLength;
     const midLen = cfg.set.middleLength;
     const gap = cfg.set.gap;
     let front = -train.total / 2;
+    const out = [];
     for (let i = 0; i < cfg.formation; i += 1) {
       const len = i === 0 || i === cfg.formation - 1 ? headLen : midLen;
-      carCenters.push(front + len / 2);
+      out.push(front + len / 2);
       front += len + gap;
     }
-  }
+    return out;
+  })();
 
   const focus = new THREE.Vector3(0, CAMERA.focusY, carCenters[0]);
   const focusGoal = focus.clone();
@@ -216,6 +222,7 @@ function boot(cfg) {
   function applyView(id, animate = true) {
     const v = VIEWS.find((x) => x.id === id) ?? VIEWS[0];
     S.view = v.id;
+    applyCityVisibility();
     const base = v.focus === 'set' ? 0 : carCenters[S.car];
     focusGoal.set(0, CAMERA.focusY, base);
     if (animate) {
@@ -449,7 +456,7 @@ function boot(cfg) {
     S,
     defaults,
     formation: cfg.formation,
-    pantoCars: [2, cfg.formation - 3],
+    pantoCars: cfg.pantoCars ?? [2, cfg.formation - 3],
     setRunning,
     isRunning: () => running,
     focusCar,
@@ -498,7 +505,7 @@ function boot(cfg) {
           env.setTrees(value);
           break;
         case 'city':
-          city.setVisible(value);
+          applyCityVisibility();
           break;
         case 'density':
           city.setDensity(value / 100);
@@ -529,7 +536,7 @@ function boot(cfg) {
       env.setCatenary(true);
       env.setSlabTrack(true);
       env.setTrees(true);
-      city.setVisible(true);
+      applyCityVisibility();
       city.setDensity(1);
       city.setHeight(1);
       applyLamps();

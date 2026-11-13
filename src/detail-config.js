@@ -21,6 +21,8 @@ export const VIEWS = [
   { id: 'side', label: '侧向平视', offset: [38, 3.0, 4], focus: 'head' },
   { id: 'bogie', label: '转向架', offset: [8.5, 1.35, -6.5], focus: 'head' },
   { id: 'roof', label: '俯瞰受电弓', offset: [13, 26, 16], focus: 'head' },
+  // 全列纵览：切换时临时隐藏前景楼群（detail.js 的 applyCityVisibility），
+  // 否则 x≈58 m 的近排楼必然挡在镜头与列车之间
   { id: 'set', label: '全列纵览', offset: [96, 34, -70], focus: 'set' },
   { id: 'rear', label: '尾车回望', offset: [24, 7.5, 52], focus: 'head' },
 ];

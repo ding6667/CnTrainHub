@@ -38,6 +38,14 @@ const NOSES = {
     band: 'M8 29 L118 29 L118 34 L8 34 Z',
     bogie: [34, 96],
   },
+  // Sloped forehead of the 3rd-gen drum-body CR200J power/control car.
+  drum: {
+    w: 120,
+    shell: 'M6 38 L6 22 C6 13 13 9 27 8 L118 8 L118 38 Z',
+    glass: 'M12 17 C22 13 44 12 60 13 L58 25 L14 26 Z',
+    band: 'M6 30 L118 30 L118 35 L6 35 Z',
+    bogie: [34, 96],
+  },
 };
 
 const CAR = { w: 116, h: 64, gap: 4 };
@@ -189,6 +197,21 @@ const BASES = {
     roof: '#274a31',
     accent: '#f4d35e',
   },
+  // 2022 年后的 CR200J3-C 新涂装："中国白 / 长城灰 / 国槐绿 / 中国红"，
+  // 车窗带为墨绿、腰线为红色，俗称 "AD钙奶"，与老绿巨人并非同一配色。
+  CR200J3C: {
+    family: '复兴号',
+    top: 160,
+    origin: '动力集中三代丙型 · 中车唐山 / 大连 · "AD钙"新涂装',
+    nose: 'drum',
+    body: ['#f2f5f4', '#d3dbd8'],
+    stripe: ['#c23535', '#921f24'],
+    skirt: '#3a4440',
+    glass: '#163f2b',
+    glassTop: '#2c6a49',
+    roof: '#4a5155',
+    accent: '#1f5b3c',
+  },
 };
 
 /**
@@ -202,7 +225,8 @@ const SUFFIX = {
   'L': { formation: '16 辆长编组' },
   'B': { formation: '17 辆超长编组' },
   'BL': { formation: '17 辆超长编组' },
-  'BG': { formation: '16 辆长编组', tag: '高寒型' },
+  // CRH380BG 是 8 辆 4M4T 高寒短编；16 辆的是 CRH380BL。
+  'BG': { formation: '8 辆短编组', tag: '高寒型' },
   '-G': { tag: '高寒型' },
   '-GS': { tag: '高寒 · 技术提升' },
   '-GZ': { tag: '高寒 · 智能配置' },
@@ -271,7 +295,7 @@ const MODEL_INDEX = [
   ['CR200J1-D', 'CR200J', ['1-D']],
   ['CR200J3-A', 'CR200J', ['3-A']],
   ['CR200J3-B', 'CR200J', ['3-B']],
-  ['CR200J3-C', 'CR200J', ['3-C']],
+  ['CR200J3-C', 'CR200J3C', ['3-C']],
 ];
 
 function buildModels() {
@@ -291,6 +315,7 @@ function buildModels() {
         stripe: base.stripe,
         skirt: base.skirt,
         glass: base.glass,
+        glassTop: base.glassTop,
         roof: base.roof,
         accent: base.accent,
         formation: over?.formation ?? meta.formation ?? '8 辆编组',
@@ -346,7 +371,7 @@ function gradients(m, uid) {
       <stop offset="1" stop-color="${m.stripe[0]}"/>
     </linearGradient>
     <linearGradient id="glass-${uid}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#5c7ea6"/>
+      <stop offset="0" stop-color="${m.glassTop ?? '#5c7ea6'}"/>
       <stop offset="0.45" stop-color="${m.glass}"/>
       <stop offset="1" stop-color="${m.glass}"/>
     </linearGradient>`;

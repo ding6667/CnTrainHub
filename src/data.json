@@ -55,5 +55,90 @@
       "gap": 1.036,
       "setLength": 208.95
     }
+  },
+  "CRH5A": {
+    "name": "CRH5A",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 250,
+    "color": "#f4f7fa",
+    "accent": "#1b4f8f",
+    "model": "crh5",
+    "livery": "hexie5",
+    "liveryName": "和谐号 · 蓝腰线",
+    "title": "和谐号耐高寒动车组",
+    "note": "阿尔斯通 New Pendolino 平台（取消摆式），2007 年 4 月 18 日随第六次大提速上线京哈线。5M3T 8 辆编组、全长 211.5 m（头车 27.6 m / 中间车 25.0 m）、宽 3.20 m、车辆高 4.27 m，耐 −40 ℃。白色车身 + 窗台下细深蓝腰线、独立圆角小窗、每节车每侧一处塞拉门，扁圆钝楔形车头与叶形司机室侧窗（车迷昵称“驴”）。受电弓在 3、6 号车。",
+    "bodySize": "3.20 × 4.27 m",
+    "pantoCars": [2, 5],
+    "set": {
+      "headLength": 27.6,
+      "middleLength": 25.0,
+      "gap": 0.9,
+      "setLength": 211.5
+    }
+  },
+  "CRH5G": {
+    "name": "CRH5G",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 250,
+    "color": "#f4f7fa",
+    "accent": "#1b4f8f",
+    "model": "crh5g",
+    "livery": "hexie5g",
+    "liveryName": "和谐号 · 蓝腰线（高寒）",
+    "title": "和谐号耐高寒抗风沙动车组",
+    "note": "2013 年在 CRH5A 基础上借鉴 CRH380BG 研制的 250 km/h 统型高寒车，8 辆 5M3T、全长 211.5 m，俗称“高寒战士”。公开资料明确其外观与涂装除车钩整流罩外与 CRH5A 并无二致：白底 + 蓝色腰线 + “和谐号”与 CRH 标识 + 车头型号标识；差别在防风沙密封设备舱、加大功率空调与耐低温材料。3D 亦据此只做密封裙板与车号区分，另建了流线型车头的“技术提升型”不在本模型范围。",
+    "bodySize": "3.20 × 4.27 m",
+    "pantoCars": [2, 5],
+    "set": {
+      "headLength": 27.6,
+      "middleLength": 25.0,
+      "gap": 0.9,
+      "setLength": 211.5
+    }
+  },
+  "CRH380BG": {
+    "name": "CRH380BG",
+    "railway": "哈尔滨局",
+    "formation": 8,
+    "maxSpeed": 380,
+    "color": "#f7f9fb",
+    "accent": "#173a86",
+    "model": "crh380b",
+    "livery": "hexie380b",
+    "liveryName": "和谐号 · 蓝箭腰线",
+    "title": "和谐号高寒动车组",
+    "note": "基于 CRH3C / Velaro 平台研制的第二代高寒车，2012 年 12 月率先投入哈大高铁，2014 年按铁总运〔2014〕150 号定名 CRH380BG。注意是 8 辆 4M4T 短编（不是 16 辆的 CRH380BL），全长约 200.67 m、宽 3.265 m、高 3.89 m。白底 + 深蓝细腰线，车头有蓝色箭形上扬，通长黑窗带、头车观光区大块黑窗、门上椭圆窗与鼻尖圆形车钩罩。受电弓在 2、7 号车。",
+    "bodySize": "3.265 × 3.89 m",
+    "pantoCars": [1, 6],
+    "set": {
+      "headLength": 25.6,
+      "middleLength": 24.325,
+      "gap": 0.5,
+      "setLength": 200.65
+    }
+  },
+  "CR200J3-C": {
+    "name": "CR200J3-C",
+    "railway": "哈尔滨局",
+    "formation": 9,
+    "maxSpeed": 160,
+    "color": "#eef1f2",
+    "accent": "#1f5b3c",
+    "model": "cr200j",
+    "livery": "adcal",
+    "liveryName": "AD钙 · 国槐绿",
+    "title": "复兴号动力集中动车组（三代丙型 · 鼓形）",
+    "note": "2022 年 12 月随新成昆铁路亮相的三代 CR200J 短编：1 节 FXD3-J 动力车 + 7 节拖车 + 1 节控制车，全长约 232.4 m，鼓形车体、低阻力流线型车头。注意涂装已不是 2019 年的“绿巨人”绿底黄腰线，而是 2022 年后的新涂装：中国白 / 长城灰车身、国槐绿盲窗带与前脸、窗带下方中国红双细线并在头车扬起双弧、石墨灰车顶与风挡、金色路徽与“复兴号”、白色 CR 标识，被旅客称为“AD钙奶”。",
+    "bodySize": "3.36 × 4.43 m",
+    "pantoCars": [0],
+    "carLengths": [20.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 27.6],
+    "set": {
+      "headLength": 27.6,
+      "middleLength": 26.0,
+      "gap": 0.35,
+      "setLength": 232.4
+    }
   }
 }
