@@ -24,6 +24,7 @@
         <p id="journey-sub">真实里程驱动的分块场景</p>
       </div>
       <div id="topright">
+        <select id="start-select" aria-label="选择出发高铁站"></select>
         <select id="route-select" aria-label="选择线路"></select>
         <span id="livery-tag">按里程加载</span>
       </div>
@@ -31,6 +32,13 @@
 
     <aside id="dock" aria-label="漫游控制台">
       <div class="dock-scroll">
+        <section class="grp">
+          <h2>车底</h2>
+          <div class="row"><label for="c-model">动车组</label><select id="c-model"></select></div>
+          <div class="row"><label for="c-formation">编组</label><select id="c-formation"><option value="8">8 辆标准编</option><option value="16">16 辆长编</option></select></div>
+          <p class="hintline" id="train-note">CR400BF-GZ · 8 辆 · 208.95 m</p>
+        </section>
+
         <section class="grp">
           <h2>运行</h2>
           <div class="row"><label for="c-speed">演示速度</label><output id="o-speed">120 km/h</output><input id="c-speed" type="range" min="0" max="300" step="5" value="120" /></div>

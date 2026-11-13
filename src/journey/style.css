@@ -2,7 +2,7 @@
 
 #journey-sub { max-width: 46ch; }
 
-#route-select {
+#route-select, #start-select {
   min-width: 168px;
   max-width: 240px;
   padding: 8px 28px 8px 11px;
@@ -20,7 +20,8 @@
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
 }
-#route-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#start-select { min-width: 190px; max-width: 260px; border-color: rgba(227, 166, 58, 0.5); }
+#route-select:focus-visible, #start-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* 里程进度：按真实公里数走，不是动画装饰 */
 .progress {
@@ -73,7 +74,7 @@
 
 /* 顶栏线路选择与标签在小屏收起 */
 @media (max-width: 860px) {
-  #route-select { min-width: 120px; max-width: 150px; font-size: 11px; }
+  #route-select, #start-select { min-width: 110px; max-width: 145px; font-size: 11px; }
   #livery-tag { display: none; }
   #specs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

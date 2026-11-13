@@ -85,9 +85,22 @@ function boot() {
   const rim = new THREE.DirectionalLight(0x74b6ff, 1.6);
   scene.add(rim, rim.target);
 
+  /**
+   * 重烘阴影。shadowMap.autoUpdate=false 时，直接把 needsUpdate 置 true 会让
+   * Three.js 每次新建一张阴影 RenderTarget 而旧的不释放（renderer.info.memory.textures
+   * 每切一次车/主题就 +1）。先显式 dispose 并把 map 置 null，计数才稳定。
+   */
+  function refreshShadows() {
+    key.shadow.map?.dispose();
+    key.shadow.map = null;
+    renderer.shadowMap.needsUpdate = true;
+  }
+
   const S = {
     routeId: params.get('route') || ROUTES[0].id,
     modelId: params.get('model') || 'CR400BF-GZ',
+    formation: Number(params.get('formation')) === 16 ? 16 : 8,
+    startKm: 0,
     kmh: MOTION.defaultKmh,
     accel: MOTION.acceleration,
     theme: params.get('theme') || 'day',
@@ -209,8 +222,56 @@ function boot() {
   }
 
   // -------------------------------------------------------------- actors ---
-  const train = buildTrain(MODELS[S.modelId] ?? MODELS['CR400BF-GZ']);
+  // ---------------------------------------------------------------- 车底 ---
+  // 换车型 / 换 8↔16 编组都要重建车底：逐节车长、受电弓位置、涂装贴图都随编组变。
+  function trainConfig() {
+    const base = MODELS[S.modelId] ?? MODELS['CR400BF-GZ'];
+    // CR200J3-C 实车是 9 辆短编（1 动力 + 7 拖 + 1 控制），不硬凑成 8 辆；
+    // 选「16 辆长编」时按 1 动力 + 14 拖 + 1 控制示意重联长编。
+    const n = base.model === 'cr200j' ? (S.formation === 16 ? 16 : 9) : S.formation;
+    const gap = base.set.gap;
+    const cfg = { ...base, formation: n };
+    if (base.model === 'cr200j') {
+      cfg.carLengths = [20.0, ...Array(n - 2).fill(26.0), 27.6];
+      cfg.pantoCars = [0];
+    } else if (base.model !== 'cr400bf') {
+      cfg.carLengths = Array.from({ length: n }, (_, i) => (
+        i === 0 || i === n - 1 ? base.set.headLength : base.set.middleLength
+      ));
+      cfg.pantoCars = [2, n - 3];
+    } else {
+      cfg.pantoCars = [2, n - 3];
+    }
+    const lengths = cfg.carLengths ?? Array.from({ length: n }, (_, i) => (
+      i === 0 || i === n - 1 ? base.set.headLength : base.set.middleLength
+    ));
+    cfg.set = { ...base.set, setLength: lengths.reduce((a, b) => a + b, 0) + gap * (n - 1) };
+    return cfg;
+  }
+
+  let train = buildTrain(trainConfig());
   scene.add(train.group);
+
+  function syncTrainHud(cfg) {
+    $('train-note').textContent = cfg.model === 'cr200j' && cfg.formation === 9
+      ? `${S.modelId} · 9 辆短编（实车） · ${cfg.set.setLength.toFixed(2)} m`
+      : `${S.modelId} · ${cfg.formation} 辆 · ${cfg.set.setLength.toFixed(2)} m`;
+    $('livery-tag').textContent = `${S.modelId} · ${cfg.formation} 辆`;
+  }
+
+  function rebuildTrain() {
+    scene.remove(train.group);
+    train.dispose();
+    const cfg = trainConfig();
+    train = buildTrain(cfg);
+    scene.add(train.group);
+    train.setWireframe(S.wire);
+    train.materials.glass.emissiveIntensity = S.theme === 'night' ? 0.07 : S.theme === 'dusk' ? 0.04 : 0.01;
+    syncTrainHud(cfg);
+    // 列车阴影是启动那次静态烘的；换车底不重烘，否则每次切换都会新建一张
+    // 阴影 RenderTarget（renderer.info.memory.textures 单调 +1）。
+  }
+  syncTrainHud(trainConfig());
 
   const terrain = buildTerrain(theme);
   scene.add(terrain.group);
@@ -419,8 +480,11 @@ function boot() {
     const v = VIEWS.find((x) => x.id === id) ?? VIEWS[0];
     S.view = v.id;
     focusZ = v.aim ?? 0;
+    // 16 辆长编约 417 m（8 辆约 210 m），机位整体后撤才收得进画面；
+    // 司机视角保持贴脸，不缩放。
+    const span = S.formation === 16 && v.id !== 'cab' ? 1.45 : 1;
     controls.target.set(0, CAMERA.focusY, focusZ);
-    cam.position.set(v.offset[0], v.offset[1], v.offset[2]);
+    cam.position.set(v.offset[0] * span, v.offset[1] * span, v.offset[2] * span);
     cam.lookAt(controls.target);
     controls.update();
     $('c-view').value = v.id;
@@ -458,7 +522,7 @@ function boot() {
     if (factory.applyTheme) factory.applyTheme(theme);
     else if (factory.setNight) factory.setNight(id === 'night');
     train.materials.glass.emissiveIntensity = id === 'night' ? 0.07 : id === 'dusk' ? 0.04 : 0.01;
-    renderer.shadowMap.needsUpdate = true;
+    refreshShadows();
     // 主题变了，已建块里的亮窗/雪色要重建
     clearChunks();
   }
@@ -470,13 +534,14 @@ function boot() {
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * q.ratio);
     renderer.setSize(innerWidth, innerHeight);
     key.shadow.mapSize.set(q.shadow, q.shadow);
-    key.shadow.map?.dispose();
-    key.shadow.map = null;
-    renderer.shadowMap.needsUpdate = true;
+    refreshShadows();
   }
 
   // ----------------------------------------------------------------- ui ---
   const routeSel = $('route-select');
+  const startSel = $('start-select');
+  const modelSel = $('c-model');
+  const formationSel = $('c-formation');
   for (const r of ROUTES) {
     const o = document.createElement('option');
     o.value = r.id;
@@ -484,6 +549,44 @@ function boot() {
     routeSel.appendChild(o);
   }
   routeSel.value = S.routeId;
+
+  // 出发站按线路分组列出全部高铁站，选哪站就从该站的真实累计里程起跑
+  function populateStartStations() {
+    startSel.innerHTML = '';
+    for (const r of ROUTES) {
+      const g = document.createElement('optgroup');
+      g.label = r.name;
+      for (const n of (r.nodes || []).filter((x) => x.role === 'hub' || x.role === 'local')) {
+        const o = document.createElement('option');
+        o.value = `${r.id}|${n.km}`;
+        o.textContent = `${n.name} · ${n.km.toFixed(0)} km`;
+        g.appendChild(o);
+      }
+      startSel.appendChild(g);
+    }
+  }
+  function syncStartSelection() {
+    const target = `${route.id}|${S.startKm}`;
+    if ([...startSel.options].some((o) => o.value === target)) {
+      startSel.value = target;
+      return;
+    }
+    const first = [...startSel.options].find((o) => o.value.startsWith(`${route.id}|`));
+    if (first) startSel.value = first.value;
+  }
+  populateStartStations();
+  S.startKm = route.nodes?.[0]?.km ?? 0;
+  syncStartSelection();
+
+  for (const [id, m] of Object.entries(MODELS)) {
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = `${m.name} · ${m.title ?? ''}`;
+    modelSel.appendChild(o);
+  }
+  modelSel.value = S.modelId;
+  formationSel.value = String(S.formation);
+
   const viewSel = $('c-view');
   for (const v of VIEWS) {
     const o = document.createElement('option');
@@ -526,7 +629,7 @@ function boot() {
       S[key] = el.checked;
       if (key === 'wire') {
         train.setWireframe(el.checked);
-        renderer.shadowMap.needsUpdate = true;
+        refreshShadows();
       } else {
         if (key === 'rural') terrain.setVisible?.('rural', el.checked);
         clearChunks();
@@ -538,22 +641,54 @@ function boot() {
   $('c-quality').value = S.quality;
   $('c-quality').addEventListener('change', (e) => applyQuality(e.target.value));
   viewSel.addEventListener('change', (e) => applyView(e.target.value));
+  modelSel.addEventListener('change', (e) => {
+    S.modelId = e.target.value;
+    rebuildTrain();
+    applyView(S.view);
+    notice(`更换车底 · ${S.modelId}`);
+  });
+  formationSel.addEventListener('change', (e) => {
+    S.formation = Number(e.target.value);
+    rebuildTrain();
+    applyView(S.view);
+    notice(`编组切换 · ${$('train-note').textContent}`);
+  });
+  startSel.addEventListener('change', (e) => {
+    const [rid, kmText] = e.target.value.split('|');
+    const r = routeById(rid);
+    if (!r) return;
+    route = r;
+    S.routeId = r.id;
+    S.startKm = Number(kmText);
+    travel = S.startKm * 1000;
+    velocity = 0;
+    setRunning(false);
+    routeSel.value = r.id;
+    $('sp-route').textContent = r.name;
+    $('sp-km').textContent = `${r.officialKm} km`;
+    clearChunks();
+    const stationName = e.target.selectedOptions[0]?.textContent.split(' · ')[0] ?? '该站';
+    notice(`从 ${stationName} 出发 · 向 ${r.name} 终点方向`);
+  });
   routeSel.addEventListener('change', (e) => {
     route = routeById(e.target.value) ?? ROUTES[0];
     S.routeId = route.id;
-    travel = 0;
+    S.startKm = route.nodes?.[0]?.km ?? 0;
+    travel = S.startKm * 1000;
     velocity = 0;
     clearChunks();
+    syncStartSelection();
     $('sp-route').textContent = route.name;
     $('sp-km').textContent = `${route.officialKm} km`;
     notice(`切换线路 · ${route.name}`);
   });
   $('a-reset').addEventListener('click', () => {
-    travel = 0; velocity = 0; running = false;
+    S.startKm = route.nodes?.[0]?.km ?? 0;
+    travel = S.startKm * 1000; velocity = 0; running = false;
     applyView('hero');
     applyTheme('day'); S.theme = 'day'; syncAll();
     clearChunks();
-    notice('已回到起点 · 哈尔滨');
+    notice('已回到线路起点');
   });
   $('a-export').addEventListener('click', () => {
     renderer.render(scene, cam);
@@ -572,6 +707,9 @@ function boot() {
     $('c-theme').value = S.theme;
     $('c-quality').value = S.quality;
     viewSel.value = S.view;
+    modelSel.value = S.modelId;
+    formationSel.value = String(S.formation);
+    syncStartSelection();
   }
 
   let noticeTimer = 0;
@@ -585,7 +723,7 @@ function boot() {
 
   // --------------------------------------------------------------- loop ---
   const clock = new THREE.Clock();
-  let travel = 0; // 真实累计里程（米）
+  let travel = S.startKm * 1000; // 真实累计里程（米），从选中的出发站起算
   let velocity = 0;
   let running = false;
   let elapsed = 0;
@@ -679,14 +817,14 @@ function boot() {
     cam.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * (QUALITY.find((q) => q.id === S.quality)?.ratio ?? 1));
     renderer.setSize(innerWidth, innerHeight);
-    renderer.shadowMap.needsUpdate = true;
+    refreshShadows();
   });
 
   requestAnimationFrame(() => {
-    renderer.shadowMap.needsUpdate = true;
+    refreshShadows();
     renderer.render(scene, cam);
     $('loader').classList.add('done');
-    notice('哈尔滨 · 从哈尔滨站出发');
+    notice('按真实里程加载 · 可从任意高铁站出发');
   });
 
   if (import.meta.env.DEV) {
@@ -699,6 +837,10 @@ function boot() {
       moving: running,
       chunks: alive.size,
       chunkKinds: [...alive.values()].map((x) => x.kind),
+      model: S.modelId,
+      formation: S.formation,
+      trainLength: +train.total.toFixed(2),
+      startKm: S.startKm,
       calls: renderer.info.render.calls,
       tris: renderer.info.render.triangles,
       textures: renderer.info.memory.textures,
