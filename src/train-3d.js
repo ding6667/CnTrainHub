@@ -161,7 +161,7 @@ function buildCanopyGeometry(length) {
 
   for (let s = 0; s <= rows; s += 1) {
     const t = s / rows;
-    const z = -length / 2 + 0.35 + 7.0 * Math.pow(t, 1.1);
+    const z = -length / 2 + 0.35 + 4.65 * Math.pow(t, 1.1);
     const sec = sectionAt(z, length, true);
     // 前缘盖满整个鼻锥顶，后缘收成一条横跨车顶的宽弧（实车风挡后缘是横向的，不是尖尾）
     const span = 6 - 3 * Math.pow(t, 1.5);
@@ -200,7 +200,7 @@ function layout(isHead, length) {
   const half = length / 2;
   if (isHead) {
     return {
-      cab: { z0: -half + 6.5, z1: -half + 8.7, y0: 2.34, y1: 3.04 },
+      cab: { z0: -half + 6.2, z1: -half + 9.0, y0: 2.3, y1: 3.1, tipY0: 2.76, tipY1: 2.92 },
       doors: [-half + 11.9, half - 2.9],
       windows: Array.from({ length: 7 }, (_, i) => -half + 13.9 + i * 1.46),
       winW: 1.12,
@@ -249,10 +249,10 @@ function buildGlassGeometry(isHead, length, seed) {
       const c = L.cab;
       const g = new THREE.BufferGeometry();
       const pts = [
-        [c.z0, c.y0 + 0.16],
+        [c.z0, c.tipY0],
         [c.z1, c.y0],
         [c.z1, c.y1],
-        [c.z0 + 0.34, c.y1],
+        [c.z0 + 0.2, c.tipY1],
       ];
       const pos = [];
       const order = side > 0 ? [0, 1, 2, 3] : [3, 2, 1, 0];
@@ -588,10 +588,10 @@ function liveryTexture(kind, variant, palette, label) {
   if (isHead) {
     const canopyEdge = [
       [0, yPx(1.5)],
-      [TEX_W * 0.08, yPx(1.95)],
-      [TEX_W * 0.16, yPx(2.5)],
-      [TEX_W * 0.24, yPx(3.1)],
-      [noseEnd * 0.82, PX_SHOULDER],
+      [TEX_W * 0.07, yPx(1.95)],
+      [TEX_W * 0.13, yPx(2.5)],
+      [TEX_W * 0.17, yPx(3.0)],
+      [TEX_W * 0.2, PX_SHOULDER],
     ];
     const trace = () => {
       ctx.beginPath();
@@ -608,6 +608,7 @@ function liveryTexture(kind, variant, palette, label) {
     ctx.moveTo(0, 0);
     ctx.lineTo(noseEnd * 0.82, 0);
     ctx.lineTo(noseEnd * 0.82, PX_SHOULDER);
+    ctx.lineTo(TEX_W * 0.2, PX_SHOULDER);
     for (let i = canopyEdge.length - 2; i >= 0; i -= 1) {
       const [x, y] = canopyEdge[i];
       const [px, py] = canopyEdge[i + 1];
@@ -634,19 +635,37 @@ function liveryTexture(kind, variant, palette, label) {
     trace();
     ctx.stroke();
     ctx.restore();
+    // 风挡缘再压一道白细线：红/金/白相间，而不是整片黑
+    ctx.strokeStyle = 'rgba(244,247,250,.85)';
+    ctx.lineWidth = 2;
+    ctx.save();
+    ctx.translate(0, 16);
+    trace();
+    ctx.stroke();
+    ctx.restore();
 
-    // 司机室侧窗框
+    // 司机室侧窗：由后至前逐渐变窄的黑色楔形（后缘高、前缘收成尖）
     const c = L.cab;
     ctx.beginPath();
-    ctx.moveTo(uPx(c.z0), yPx(c.y0 + 0.16));
+    ctx.moveTo(uPx(c.z0), yPx(c.tipY0));
     ctx.lineTo(uPx(c.z1), yPx(c.y0));
     ctx.lineTo(uPx(c.z1), yPx(c.y1));
-    ctx.lineTo(uPx(c.z0 + 0.34), yPx(c.y1));
+    ctx.lineTo(uPx(c.z0 + 0.2), yPx(c.tipY1));
     ctx.closePath();
     ctx.fillStyle = '#0a0f14';
     ctx.fill();
+    // 上缘红描边、下缘金细线
     ctx.strokeStyle = palette === 'dragon' ? P.red : P.gold;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(uPx(c.z0), yPx(c.tipY1));
+    ctx.lineTo(uPx(c.z1), yPx(c.y1));
+    ctx.stroke();
+    ctx.strokeStyle = P.gold;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(uPx(c.z0), yPx(c.tipY0));
+    ctx.lineTo(uPx(c.z1), yPx(c.y0));
     ctx.stroke();
 
     // 头灯位置（实体灯罩另有网格，这里画灯腔）
