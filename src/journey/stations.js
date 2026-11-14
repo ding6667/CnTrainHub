@@ -33,9 +33,36 @@
  * 重复的雨棚柱 / 接触网柱 / 灯柱 / 枕木走 InstancedMesh（逐实例矩阵 + 逐实例颜色）；
  * 单站 / 单 depot 都是 4 个 mesh（实体 1 + 柱 1 + 枕木 1 + 站牌 1），纹理每站 1 张；
  * 单位几何、材质、按 id 的合并几何与站牌贴图全部进缓存复用，disposeStations() 统一释放。
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * 【v2 新增，文件末尾】buildStationField / createStationSystem / buildDepot 增强
+ *  v1 的 STATION_CATALOG / stationById / buildStation / buildDepot / disposeStations
+ *  全部保留、签名与外观资产一个没动；只往下追加新导出并让 buildDepot 读懂布局数据。
+ *
+ * 【需求 2：开门规则怎么落到停车区间上】
+ *  站场侧（本文件 + station-layouts.js）只负责把 platformLength 和 stopZones 的
+ *  划分（trackIndex / platformIndex / dwellSec）交给框架，**判定一律走
+ *  core.evaluateStop(trainSpec, zone, s, dir)，这里绝不重新实现**。
+ *  大白话：framework.zonesNear 用站中心绝对里程 cs 生成 zone 的 [s0, s1] = [cs-L/2, cs+L/2]；
+ *  core.evaluateStop 把每个车门换算成 doorMileage = s - dir*doorZ，取最前/最后两个，
+ *  只要这两个都没跑出 [s0, s1]（frontMargin>=0 且 rearMargin>=0）就允许开关门。
+ *  所以站台上「两端各一块停车区间标」标的就是 s0 / s1 这两个边界：车头车尾的车门
+ *  都夹在两标之间才能开门。站台有效长 L 决定区间够不够长（16 辆长编按 450 m）。
+ *  buildStationField 把这两块标画在 z = ∓L/2 处，和区间边界一一对应。
+ *
+ * 【站场局部坐标 / 集成层摆位口径】
+ *  buildStationField 返回的 Group：局部原点 = 站场中心，轨道沿 Z，几何以原点对称
+ *  （站台 z ∈ [-L/2, +L/2]，股道按 trackLengths 可更长）。harbin.js 会把它
+ *  field.position.z = -chunkLength/2，createChunkSystem 再乘 halfShift(+chunkLength/2)，
+ *  站场中心最终落在块中心（取帧点）。所以这里**不自己偏移**，由集成层摆位。
+ *  全部站台体底面 y=0、顶面 y=1.25（不穿轨顶 y=0）；钢轨/枕木/道床全在 y≤0；
+ *  雨棚柱、站牌柱底面都在站台面 1.25 以上。
+ * ═══════════════════════════════════════════════════════════════════════
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RAIL, LANE, EVENT, SYSTEM_PHASE, DOOR_STATE } from './core.js';
+import { STATION_LAYOUTS, DEPOT_LAYOUTS, layoutFor } from './station-layouts.js';
 
 // ---------------------------------------------------------------- 来源 URL ----
 // catalog 里每项的 sources 都指向这里，文件头注释只摘了其中 8 条。
@@ -848,32 +875,56 @@ export function buildStation(id, opts = {}) {
 }
 
 // ---------------------------------------------------------------- 车辆段 ----
-function buildDepotYard(c, info, quality) {
+function buildDepotYard(c, info, quality, layout) {
   const P = info.pal;
-  const L = 80;
+  // 段内股道数 / 长度按 DEPOT_LAYOUTS 说话：
+  //  - 核实到 shedLength（哈尔滨动车段 470m、哈尔滨车辆段轮轴库 192m）就按库长铺股道；
+  //  - 核实到 yardTracks / shedTracks 就按它排股道数；
+  //  - 都没核实（三棵树机务段等）就退回 v1 的 8 条 / 半长 80m 通用示意，不冒充真实规模。
+  const nTracks = Math.max(4, Math.min(16,
+    Number(layout?.yardTracks) ||
+    (Number(layout?.shedTracks) ? Number(layout.shedTracks) + 2 : 8)));
+  const L = Math.max(80, (Number(layout?.shedLength) || 160) / 2);
   const step = quality === 'low' ? 3.0 : quality === 'high' ? 1.4 : 2.0;
-  const centers = [-24, -17, -10, -3, 3, 10, 17, 24];
-  box(c, 0x8f8a7c, 64, 0.5, L * 2, 0, -0.30, 0);
+  const gap = 7;                                  // 段内股道间距（规范：检查库线 7~8m）
+  const centers = Array.from({ length: nTracks }, (_, i) => (i - (nTracks - 1) / 2) * gap);
+  const yardW = (nTracks - 1) * gap + 12;
+  box(c, 0x8f8a7c, yardW, 0.5, L * 2, 0, -0.30, 0);   // 道床顶 y=-0.05、底 y=-0.55，全在 y≤0
   for (const cx of centers) {
-    for (const s of [-1, 1]) box(c, 0x9298a0, 0.12, 0.14, L * 2, cx + s * 0.7175, -0.07, 0);
+    for (const s of [-1, 1]) box(c, 0x9298a0, 0.12, 0.14, L * 2, cx + s * RAIL.railHalf, -0.07, 0);
     for (let z = -L + 1; z < L; z += step) sleeper(c, cx, -0.13, z, 2.7, 0.16, 0.26);
   }
-  // 道岔示意：咽喉区几段斜向岔线 + 岔心
+  // 段管线 / 出库道岔：alignment.depotLane() 的进路是「站外侧横移 26 m、
+  // 进站前 1100 m 起用 340 m 缓和段」，这里在段咽喉用斜向岔线 + 岔心示意接入，
+  // 出库线数量取 layout.arrivalTracks（未核实时按规范「不宜少于 2 条」用 2）。
+  const arrival = Math.max(1, Number(layout?.arrivalTracks) || 2);
   for (const s of [-1, 1]) {
-    for (let k = 0; k < 3; k++) {
-      const z0 = 52 + k * 8;
-      box(c, 0x6e747a, 0.1, 0.12, 16, s * (6 + k * 5), -0.06, z0, 0, s * 0.32, 0);
-      box(c, 0x3a3f45, 0.8, 0.12, 0.8, s * (6 + k * 5), -0.05, z0 - 7);
+    box(c, 0x6e747a, 0.10, 0.12, 46, s * 26, -0.06, L * 0.72, 0, s * 0.42, 0);  // 段管线斜接正线
+    for (let k = 0; k < arrival; k += 1) {
+      const z0 = L * 0.55 + k * 10;
+      box(c, 0x6e747a, 0.10, 0.12, 18, s * (8 + k * 6), -0.06, z0, 0, s * 0.32, 0);
+      box(c, 0x3a3f45, 0.8, 0.12, 0.8, s * (8 + k * 6), -0.05, z0 - 8);
     }
   }
-  // 接触网柱（两侧）
+  // 接触网柱（两侧，随段宽外移）
   for (const s of [-1, 1]) {
     for (let z = -L + 6; z <= L - 6; z += 24) {
-      post(c, 0x70767c, s * 31, 3.8, z, 0.32, 7.6, 0.32);
-      box(c, 0x5a6066, 7.0, 0.16, 0.22, s * 27.5, 7.35, z);
+      post(c, 0x70767c, s * (yardW / 2 + 2), 3.8, z, 0.32, 7.6, 0.32);
+      box(c, 0x5a6066, 7.0, 0.16, 0.22, s * (yardW / 2 - 1.5), 7.35, z);
     }
   }
   for (const cx of centers) box(c, P.accent, 0.06, 0.06, L * 2, cx, 6.35, 0);
+  // 转盘 / 列检棚 / 多层检修标识：主体几何在 buildLoco(扇形库+转盘)、
+  // buildWagon(列检棚)、buildEMU(三层检修栈桥)里；这里按 layout 字段再补一块
+  // 地面圆盘 / 棚柱，让「哪些段有转盘、哪些有列检棚」在几何上能直接看出来。
+  if (layout?.turntable) cyl(c, 0x4a4f55, 8, 0.12, 0, -0.04, -L * 0.55);
+  if (layout?.inspectionShed) {
+    for (const s of [-1, 1]) {
+      for (let z = -L * 0.4; z <= L * 0.4; z += 14) {
+        post(c, 0x5a6066, s * (yardW / 2 - 3), 4.5, z, 0.3, 9.0, 0.3);
+      }
+    }
+  }
 }
 
 function buildEMU(c, P) { // 动车段检修库：大跨门式刚架 + 三层检修栈桥 + 地沟
@@ -941,11 +992,11 @@ function buildWagon(c, P) { // 车辆段列检棚：开敞柱网 + 单坡顶 + �
 
 const DEPOT_BUILDERS = { emu: buildEMU, loco: buildLoco, wagon: buildWagon };
 
-function composeDepot(kind, seed, quality) {
+function composeDepot(kind, seed, quality, layout) {
   const info = DEPOT_INFO[kind] || DEPOT_INFO.wagon;
   const c = newCollector();
   const R = mulberry32(seed);
-  buildDepotYard(c, info, quality);
+  buildDepotYard(c, info, quality, layout);
   (DEPOT_BUILDERS[kind] || buildWagon)(c, info.pal, R);
   const placements = [
     { x: 10, y: 3.6, z: -30 }, { x: -10, y: 3.6, z: -30 },
@@ -973,12 +1024,20 @@ function depotSlug(kind) {
 export function buildDepot(kind, opts = {}) {
   ensure();
   const k = depotSlug(kind);
+  const layout = depotLayoutFor(kind, opts);      // 见文件末尾：按 depot slug / 中文名 / 三型取布局
   const seed = opts.seed ?? hashSeed('depot:' + k);
   const quality = opts.quality || 'mid';
-  const key = `depot:${k}|${seed}|${quality}`;
+  const key = `depot:${k}|${layout?.id || 'none'}|${seed}|${quality}`;
   let pack = CACHE.packs.get(key);
-  if (!pack) { pack = composeDepot(k, seed, quality); CACHE.packs.set(key, pack); }
-  return instantiate(pack, 'depot:' + k, { depotKind: k, name: DEPOT_INFO[k].name, note: DEPOT_INFO[k].note, sources: DEPOT_INFO[k].sources });
+  if (!pack) { pack = composeDepot(k, seed, quality, layout); CACHE.packs.set(key, pack); }
+  return instantiate(pack, 'depot:' + k, {
+    depotKind: k, name: DEPOT_INFO[k].name, note: DEPOT_INFO[k].note,
+    sources: DEPOT_INFO[k].sources,
+    layoutId: layout?.id ?? null,
+    shedTracks: layout?.shedTracks ?? null,
+    shedLength: layout?.shedLength ?? null,
+    arrivalTracks: layout?.arrivalTracks ?? null,
+  });
 }
 
 /** 释放共享缓存里的全部几何 / 材质 / 贴图；之后再 build 会按需重建。 */
@@ -992,4 +1051,382 @@ export function disposeStations() {
   CACHE.packs.clear();
   CACHE.unit = {};
   CACHE.ready = false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  以下全是 v2 新增（需求 2 停站 / 需求 5 车辆段 / 全局站务系统）。
+//  复用上面 v1 的 CACHE / ensure / put / box / post / sleeper / assemble /
+//  instantiate / signStanchions / makeSignGeometry / hashSeed，绝不另起一套建模工具。
+//  v1 的五个导出（STATION_CATALOG / stationById / buildStation / buildDepot /
+//  disposeStations）签名与行为一律不变，外观资产一个没删。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 段布局查询：depot slug / 中文名 / 别名精确命中，再按三型关键字兜底。 */
+function depotLayoutFor(kind, opts = {}) {
+  const raw = String(opts.layoutId || kind || '');
+  const hit = layoutFor(raw, 'depot');
+  if (hit) return hit;
+  if (/haxi|哈西/i.test(raw)) return DEPOT_LAYOUTS['haxi-emu-depot'];
+  if (/loco|机务|三棵/i.test(raw)) return DEPOT_LAYOUTS['sankeshu-loco'];
+  if (/wagon|coach|车辆/i.test(raw)) return DEPOT_LAYOUTS['harbin-wagon'];
+  // 泛称 'emu' / '动车' 取哈尔滨动车段作「代表布局」，只影响股道数 / 库长示意，
+  // 不冒充具体某个段（真实段名请用 depot slug 精确命中）。
+  if (/emu|动车/i.test(raw)) return DEPOT_LAYOUTS['harbin-emu-depot'];
+  return null;
+}
+
+/** catalog 外 / 无布局的沿线站：通用中小站站场，不冒充任何真实站规模。 */
+function genericFieldLayout(id) {
+  const name = String(id || '沿线车站');
+  return {
+    id, name,
+    platformCount: 2, trackCount: 4,
+    platformLength: RAIL.platformLength,
+    platformWidth: RAIL.platformWidth,
+    platformHeight: RAIL.platformHeight,
+    trackCenters: RAIL.trackCenters,
+    platformEdge: RAIL.platformEdge,
+    platformKinds: ['side', 'side'],
+    trackLengths: [650, 650, 650, 650],
+    mainTracks: [1, 2],
+    switches: [], stopZones: [],
+    generic: true,
+  };
+}
+
+/** 文字贴图（停车区间标）。按文字缓存，所有站场共用 1 张，纹理数不随站数涨。 */
+function labelTexture(text) {
+  const key = 'label:' + text;
+  if (CACHE.texs.has(key)) return CACHE.texs.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 128;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#12324a'; x.fillRect(0, 0, 512, 128);
+  x.strokeStyle = '#ffd23f'; x.lineWidth = 6; x.strokeRect(8, 8, 496, 112);
+  x.fillStyle = '#ffe27a'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = 'bold 46px "Microsoft YaHei","PingFang SC","SimHei",sans-serif';
+  x.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = false;                       // 与 signTexture 口径一致，UV 在 makeSignGeometry 里翻
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  CACHE.texs.set(key, tex);
+  return tex;
+}
+
+/**
+ * 按真实布局画站场几何（纯往 collector 里塞 box / post / sleeper，不组装）。
+ * 局部原点 = 站场中心，轨道沿 Z，所有几何以 z=0 对称；由集成层摆位，见文件头。
+ */
+function buildFieldGeometry(c, layout, quality) {
+  const P = Math.max(1, layout.platformCount);
+  const T = Math.max(1, layout.trackCount);
+  const PL = Number(layout.platformLength) || RAIL.platformLength;
+  const PW = Number(layout.platformWidth) || RAIL.platformWidth;
+  const PH = Number.isFinite(layout.platformHeight) ? layout.platformHeight : RAIL.platformHeight;
+  const EDGE = Number.isFinite(layout.platformEdge) ? layout.platformEdge : RAIL.platformEdge;
+  const half = PL / 2;
+
+  // 股道间距分两种：夹了站台的间隙要塞下 12 m 站台 + 两侧 1.75 m 边缘 = 15.5 m；
+  // 不夹站台的普通相邻到发线按 6.5 m（线间距 5.0 + 余量）排。
+  // 旧版把所有间隙都按 15.5 m 排，22 股道会摊成 325 m 宽的灰色巨板，
+  // 起点英雄机位半屏都被站台盖住；按真实咽喉布置混合间距后约 210 m 宽。
+  const PLAT_GAP = PW + 2 * EDGE;
+  const TRACK_GAP = RAIL.trackCenters + 1.5;
+  const nPlat = Math.min(P, Math.max(1, T - 1));
+  const hasPlatform = new Array(Math.max(0, T - 1)).fill(false);
+  for (let j = 0; j < nPlat; j += 1) {
+    const idx = nPlat === 1 ? Math.floor((T - 1) / 2) : Math.round((j * (T - 2)) / (nPlat - 1));
+    hasPlatform[Math.min(T - 2, idx)] = true;
+  }
+  const tx = [0];
+  for (let j = 0; j < T - 1; j += 1) tx.push(tx[j] + (hasPlatform[j] ? PLAT_GAP : TRACK_GAP));
+  const midX = (tx[0] + tx[T - 1]) / 2;
+  for (let i = 0; i < T; i += 1) tx[i] -= midX;
+
+  // 股道长度严格按 layout.trackLengths 的真实 / 示意值，不许一律 400 m 了事。
+  const trackLen = (i) => {
+    const a = layout.trackLengths;
+    const v = Array.isArray(a) ? Number(a[Math.min(i, a.length - 1)]) : NaN;
+    return Math.max(PL, Number.isFinite(v) ? v : 650);
+  };
+  // 站场枕木只作示意：22 股道 × 650 m 若按正线 0.6 m 实铺会到几十万面。
+  // 这里按 6~10 m 一根「刻度式」示意，股道条数与有效长仍严格按 layout 的真实值。
+  const step = quality === 'low' ? 10 : quality === 'high' ? 6 : 8;
+
+  // ---- 每条到发线：2 股钢轨（顶 y=0，全在 y≤0）+ 枕木（InstancedMesh）----
+  for (let i = 0; i < T; i += 1) {
+    const cx = tx[i];
+    const L = trackLen(i);
+    for (const s of [-1, 1]) {
+      box(c, 0x9aa0a6, 0.12, 0.14, L, cx + s * RAIL.railHalf, -0.07, 0);
+    }
+    for (let z = -L / 2 + 1; z < L / 2; z += step) {
+      sleeper(c, cx, -0.13, z, RAIL.sleeperLength, RAIL.sleeperThickness, 0.26);
+    }
+  }
+
+  // ---- 站台：只嵌在 hasPlatform 标记为 true 的股道间隙里 ----
+  let platIndex = 0;
+  for (let j = 0; j < T - 1; j += 1) {
+    if (!hasPlatform[j]) continue;
+    const left = tx[j];
+    const right = tx[j + 1];
+    const kind = (layout.platformKinds && layout.platformKinds[platIndex]) || 'island';
+    platIndex += 1;
+    const usable = Math.max(4, right - left - 2 * EDGE);
+    const w = Math.min(kind === 'side' ? 8 : PW, usable);   // 规范：侧式 8 m、岛式 12 m
+    const px = (left + right) / 2;
+    // 站台体：底 y=0、顶 y=1.25，绝不穿过轨顶 y=0（红线）
+    box(c, 0xc9c2b0, w, PH, PL, px, PH / 2, 0);
+    // 站台边缘安全白线 + 盲道（两条长边，薄片贴在站台面上）
+    for (const s of [-1, 1]) {
+      box(c, 0xf2f2ea, 0.16, 0.02, PL, px + s * (w / 2 - 0.35), PH + 0.011, 0);
+      box(c, 0xd8b23a, 0.32, 0.02, PL, px + s * (w / 2 - 0.9), PH + 0.012, 0);
+    }
+    // 雨棚顶 + 雨棚柱（柱底在站台面 1.25 以上，不穿 y=0）
+    const roofY = 5.4;
+    box(c, 0x8a9298, w + 1.2, 0.22, PL * 0.92, px, roofY, 0);
+    for (let z = -half + 4; z <= half - 4; z += 24) {
+      post(c, 0x7c848a, px, (PH + roofY) / 2, z, 0.28, roofY - PH, 0.28);
+    }
+    // 停车区间标（两端各一块）：对应 StopZone 的 s0 / s1 = 站中心 ∓ PL/2，
+    // 即「两端车门都夹在 [s0,s1] 内才允许开门」的判定边界（core.evaluateStop）。
+    for (const s of [-1, 1]) {
+      box(c, 0xffd23f, w * 0.9, 0.03, 0.5, px, PH + 0.02, s * (half - 0.3));
+      box(c, 0x3a3f45, 0.18, 1.1, 0.18, px, PH + 0.55, s * (half - 0.3));
+    }
+  }
+
+  // ---- 进出站道岔：按 layout.switches 的本地相对几何摆示意岔尖 ----
+  // sw.s 是站中心为 0 的相对米，这里直接当局部 z 用；运行时绝对里程道岔由
+  // alignment.switchPoints(lane) 生成，本数组只供站场摆岔尖 / HUD 报进路编号。
+  for (const sw of (layout.switches || [])) {
+    const sgn = Math.sign(sw.lateral) || 1;
+    const x0 = sw.kind === 'entry' ? 0 : sgn * Math.abs(sw.lateral);
+    const len = Number(sw.length) || 69;                 // 18 号道岔全长（核实）
+    box(c, 0x6e747a, 0.10, 0.12, len, x0 + sgn * 1.2, -0.06, sw.s, 0, sgn * 0.06, 0);
+    box(c, 0x3a3f45, 0.7, 0.12, 0.7, x0, -0.05, sw.s - len / 2);
+  }
+}
+
+/** 组装站场几何包：复用 v1 的 assemble，再挂一张共享的「停车区间」标牌几何。 */
+function composeField(layout, quality, opts) {
+  const c = newCollector();
+  buildFieldGeometry(c, layout, quality);
+  const half = (Number(layout.platformLength) || RAIL.platformLength) / 2;
+  const signPlacements = [
+    { x: -3, y: 3.4, z: -half * 0.5 },
+    { x: 3, y: 3.4, z: half * 0.5 },
+  ];
+  signStanchions(c, signPlacements);
+  const pack = assemble(c, opts.signName || layout.name, signPlacements);
+
+  // 停车区间文字标牌：两端各一块。几何按 half 缓存复用（所有 450m 站共用一份），
+  // 贴图按文字缓存（全局 1 张），所以单站场只引用 2 张贴图（≤4 红线）。
+  const markerGeoKey = `marker:${half}`;
+  if (!CACHE.packs.has(markerGeoKey)) {
+    CACHE.packs.set(markerGeoKey, makeSignGeometry(
+      [{ x: 0, y: 2.6, z: -half }, { x: 0, y: 2.6, z: half }], 6.4, 1.0));
+  }
+  pack.markerGeo = CACHE.packs.get(markerGeoKey);
+  const label = '停车位置 · 车门区';
+  const matKey = 'label:' + label;
+  if (!CACHE.mats.has(matKey)) {
+    CACHE.mats.set(matKey, new THREE.MeshBasicMaterial({
+      map: labelTexture(label), side: THREE.FrontSide, toneMapped: false,
+    }));
+  }
+  pack.markerMatKey = matKey;
+  return pack;
+}
+
+/** 站场 Group = v1 的 4 个 mesh + 1 个停车区间标 mesh = 5 mesh（≤10 红线）。 */
+function instantiateField(pack, name, meta) {
+  const g = instantiate(pack, name, meta);
+  const marker = new THREE.Mesh(pack.markerGeo, CACHE.mats.get(pack.markerMatKey));
+  marker.name = 'stop-zone-markers';
+  g.add(marker);
+  return g;
+}
+
+/**
+ * 按真实站台数 / 股道数 / 有效长建一座站场，返回 THREE.Group。
+ * id 认电报码 / 拼音 slug / 中文名；layoutFor 找不到就现场合成通用中小站，
+ * 绝不兜底成哈尔滨站。局部原点 = 站场中心、轨道沿 Z、几何以原点对称，
+ * 不自己偏移（集成层 harbin.js 会 position.z -= chunkLength/2，createChunkSystem
+ * 再乘 halfShift 把站场中心落到块中心）。
+ * opts: { signName, quality, night, theme, centerS, chunkLength }。
+ */
+export function buildStationField(id, opts = {}) {
+  ensure();
+  const layout = layoutFor(id) || genericFieldLayout(id);
+  const quality = opts.quality || 'mid';
+  const key = `field:${layout.id}|${quality}|${opts.signName || ''}`;
+  let pack = CACHE.packs.get(key);
+  if (!pack) { pack = composeField(layout, quality, opts); CACHE.packs.set(key, pack); }
+  const g = instantiateField(pack, 'station-field:' + layout.id, {
+    stationId: layout.id,
+    name: layout.name,
+    layoutId: layout.id,
+    platformCount: layout.platformCount,
+    trackCount: layout.trackCount,
+    platformLength: layout.platformLength,
+    trackLengths: layout.trackLengths,
+    generic: Boolean(layout.generic),
+  });
+  return g;
+}
+
+/**
+ * 全局站务系统（标准 System）：管进路 / 车门 / 到发线占用的全局状态，
+ * 只挂一个轻量 HUD 叠层 group（道岔表示器红绿灯 + 停车区间高亮线），
+ * **不重复造 chunk 里的站场几何**。sys.state 供 HUD 读取。
+ * 事件由 core.createRegistry 通过 bus.on('*') 转发进来，按 EVENT 过滤。
+ */
+export function createStationSystem(ctx, opts = {}) {
+  ensure();
+  const layouts = opts.layouts ?? STATION_LAYOUTS;
+  const depotLayouts = opts.depotLayouts ?? DEPOT_LAYOUTS;
+
+  const group = new THREE.Group();
+  group.name = 'station-system-overlay';
+  group.userData.role = 'station-overlay';     // 标明这是 HUD 指示层，不是站场实体
+
+  const N = 4;                                  // 4 个道岔表示器
+  const lampPosts = new THREE.InstancedMesh(CACHE.unit.box, CACHE.mats.get('post'), N);
+  const lamps = new THREE.InstancedMesh(CACHE.unit.box, CACHE.mats.get('post'), N);
+  const mArr = new Float32Array(N * 16);
+  const lampArr = new Float32Array(N * 16);
+  const lampCol = new Float32Array(N * 3);
+  for (let i = 0; i < N; i += 1) {
+    const x = (i - (N - 1) / 2) * 6;
+    // 摆在前方 z=-26 的一排小灯柱，纯 HUD 示意，不随 chunk 摆位
+    const a = new THREE.Matrix4().compose(
+      new THREE.Vector3(x, 1.6, -26), new THREE.Quaternion(), new THREE.Vector3(0.16, 3.2, 0.16));
+    a.toArray(mArr, i * 16);
+    const b = new THREE.Matrix4().compose(
+      new THREE.Vector3(x, 3.35, -26), new THREE.Quaternion(), new THREE.Vector3(0.5, 0.5, 0.5));
+    b.toArray(lampArr, i * 16);
+    const c = new THREE.Color(0xd23b3b);      // 初始全红 = 定位（正线）
+    lampCol[i * 3] = c.r; lampCol[i * 3 + 1] = c.g; lampCol[i * 3 + 2] = c.b;
+  }
+  lampPosts.instanceMatrix.array.set(mArr); lampPosts.instanceMatrix.needsUpdate = true;
+  lamps.instanceMatrix.array.set(lampArr); lamps.instanceMatrix.needsUpdate = true;
+  lamps.instanceColor = new THREE.InstancedBufferAttribute(lampCol, 3);
+  lamps.instanceColor.needsUpdate = true;
+  group.add(lampPosts, lamps);
+
+  // 停车区间高亮线：一条细长条，颜色随车门状态变（绿=区间内/开门、红=越界禁止、暗=关）
+  const zoneMatKey = 'overlay:zone-line';
+  if (!CACHE.mats.has(zoneMatKey)) {
+    CACHE.mats.set(zoneMatKey, new THREE.MeshBasicMaterial({
+      color: 0x39424a, transparent: true, opacity: 0.85, toneMapped: false,
+    }));
+  }
+  const zoneLine = new THREE.Mesh(CACHE.unit.box, CACHE.mats.get(zoneMatKey));
+  zoneLine.scale.set(0.4, 0.03, 40);          // 40 m 长地面标线，示意停车区间
+  zoneLine.position.set(0, 0.02, -46);
+  zoneLine.name = 'stop-zone-line';
+  group.add(zoneLine);
+
+  const RED = new THREE.Color(0xd23b3b);
+  const GREEN = new THREE.Color(0x39c46a);
+  const state = {
+    switchName: LANE.MAIN,          // 当前进路（'main' 或 lane.type）
+    switchReason: '',
+    switches: [],                  // 最近一次 SWITCH 的 switchPoints（绝对里程）
+    doorState: DOOR_STATE.CLOSED,
+    doorsCanOpen: false,
+    zone: null,                    // 当前 StopZone
+    station: null,
+    occupiedTracks: [],            // 到发线占用（ARRIVE 写入、DEPART 清空）
+    platformOccupied: false,
+    arriveCount: 0,
+    departCount: 0,
+    lastEvent: null,
+    layoutCount: Object.keys(layouts).length,
+    depotLayoutCount: Object.keys(depotLayouts).length,
+  };
+
+  function paintLamps() {
+    // 扳到到发线（非 main）时按进路把对应表示器点绿，其余保持红灯（定位）。
+    const open = state.switchName && state.switchName !== LANE.MAIN;
+    for (let i = 0; i < N; i += 1) {
+      const c = open && i === (Math.abs(hashSeed(state.switchName)) % N) ? GREEN : RED;
+      lamps.instanceColor.setXYZ(i, c.r, c.g, c.b);
+    }
+    lamps.instanceColor.needsUpdate = true;
+  }
+  function paintZone() {
+    const m = CACHE.mats.get(zoneMatKey);
+    if (!m) return;
+    let col = 0x39424a;                       // 默认暗 = 无区间 / 关门
+    if (state.doorState === DOOR_STATE.BLOCKED
+        || (state.zone && !state.doorsCanOpen && state.doorState !== DOOR_STATE.CLOSED)) col = 0xd23b3b;
+    else if (state.doorState === DOOR_STATE.OPEN || state.doorState === DOOR_STATE.OPENING || state.zone) col = 0x39c46a;
+    m.color.setHex(col);
+  }
+
+  const sys = {
+    id: 'stations',
+    phase: SYSTEM_PHASE.STATIONS,
+    state,
+    group,
+    resolve: (sid) => layoutFor(sid, 'auto'),   // HUD 查站场 / 段布局用
+    init(c) { if (c?.scene && !group.parent) c.scene.add(group); },
+    update(c) {
+      if (!c) return;
+      // 每帧把运行时状态同步进 sys.state，HUD 直接读这一份，不必翻 ctx。
+      state.doorsCanOpen = Boolean(c.doorsCanOpen);
+      state.zone = c.stopZone ?? state.zone;
+      if (c.doorState?.state) state.doorState = c.doorState.state;
+      if (c.station) state.station = c.station;
+      paintZone();
+    },
+    onEvent(type, payload) {
+      switch (type) {
+        case EVENT.SWITCH:
+          state.switchName = payload?.name ?? LANE.MAIN;
+          state.switchReason = payload?.reason ?? '';
+          state.switches = payload?.switches ?? [];
+          state.lastEvent = EVENT.SWITCH;
+          paintLamps();
+          break;
+        case EVENT.DOORS:
+          state.doorState = payload?.state ?? DOOR_STATE.CLOSED;
+          if (payload?.zone) state.zone = payload.zone;
+          state.platformOccupied = state.doorState !== DOOR_STATE.CLOSED;
+          state.lastEvent = EVENT.DOORS;
+          paintZone();
+          break;
+        case EVENT.ARRIVE: {
+          if (payload?.zone) {
+            state.zone = payload.zone;
+            state.station = { id: payload.zone.stationId, name: payload.zone.name };
+            const ti = payload.zone.trackIndex;
+            if (ti != null && !state.occupiedTracks.includes(ti)) state.occupiedTracks.push(ti);
+          }
+          state.arriveCount += 1;
+          state.lastEvent = EVENT.ARRIVE;
+          paintZone();
+          break;
+        }
+        case EVENT.DEPART:
+          state.departCount += 1;
+          state.occupiedTracks = [];
+          state.platformOccupied = false;
+          state.lastEvent = EVENT.DEPART;
+          paintZone();
+          break;
+        default: break;
+      }
+    },
+    dispose() {
+      if (group.parent) group.parent.remove(group);
+      // 共享几何 / 材质由 disposeStations() 统一释放，这里不重复 dispose，
+      // 否则会把别的站场还在用的材质一起废掉。
+    },
+  };
+  return sys;
 }

@@ -43,15 +43,46 @@
           <h2>运行</h2>
           <div class="row"><label for="c-speed">演示速度</label><output id="o-speed">120 km/h</output><input id="c-speed" type="range" min="0" max="300" step="5" value="120" /></div>
           <div class="row"><label for="c-accel">加速度</label><output id="o-accel">18 m/s²</output><input id="c-accel" type="range" min="2" max="60" step="1" value="18" /></div>
+          <div class="row"><label for="c-dir">行驶方向</label><select id="c-dir"><option value="1">正向 · 里程递增</option><option value="-1">反向 · 里程递减</option></select></div>
+          <div class="acts">
+            <button id="a-reverse" type="button">逻辑掉头</button>
+            <button id="a-dwell" type="button" class="primary">进站停车</button>
+          </div>
+          <p class="hintline" id="align-note">直线 · 平坡 · 正线</p>
           <div class="progress"><i id="progress-fill"></i></div>
           <p class="hintline" id="progress-label">0.0 / 0.0 km</p>
         </section>
 
         <section class="grp">
+          <h2>进路与车门</h2>
+          <div class="row"><label for="c-lane">进路</label><select id="c-lane"><option value="main">正线通过</option><option value="station">到发线 · 经道岔进站</option><option value="depot">段管线 · 进出车辆段</option></select></div>
+          <div class="row"><label for="c-doors">车门</label><select id="c-doors"><option value="auto">自动（两端车门在区间内）</option><option value="open">请求开门</option><option value="close">请求关门</option></select></div>
+          <p class="hintline" id="door-note">车门关闭 · 待进站</p>
+        </section>
+
+        <section class="grp">
           <h2>机位</h2>
           <div class="row"><label for="c-view">预设机位</label><select id="c-view"></select></div>
+          <div class="row"><label for="c-cammode">视角模式</label><select id="c-cammode"><option value="relative">相对视角（随车身）</option><option value="absolute">绝对视角（轨旁定点）</option></select></div>
           <div class="row"><label for="c-fov">视野</label><output id="o-fov">52°</output><input id="c-fov" type="range" min="25" max="82" step="1" value="52" /></div>
           <div class="row switch"><label for="c-follow">镜头跟随</label><input id="c-follow" type="checkbox" class="tgl" checked /></div>
+          <p class="hintline">左键拖动调角度 · 中键拖动调机位 · 滚轮缩放</p>
+        </section>
+
+        <section class="grp">
+          <h2>客运</h2>
+          <div class="row"><label>站台候车</label><output id="o-waiting">0 人</output></div>
+          <div class="row"><label>车内载客</label><output id="o-onboard">0 / 0</output></div>
+          <div class="row"><label>本节上下</label><output id="o-flow">—</output></div>
+          <div class="row switch"><label for="c-passengers">显示乘客</label><input id="c-passengers" type="checkbox" class="tgl" checked /></div>
+        </section>
+
+        <section class="grp">
+          <h2>时刻表</h2>
+          <div class="row"><label>当前车次</label><output id="o-service">示意运行图</output></div>
+          <div class="row"><label>下一停站</label><output id="o-nextstop">—</output></div>
+          <div class="row switch"><label for="c-schedule">启用时刻表</label><input id="c-schedule" type="checkbox" class="tgl" checked /></div>
+          <p class="hintline">框架已预留 hook，可灌入真实运行图 JSON</p>
         </section>
 
         <section class="grp">
@@ -84,7 +115,7 @@
         <div id="gauge-meta"><span id="odo">0.00 km</span><span id="state">停车</span></div>
       </div>
       <button id="run" type="button"><span class="dot"></span><span id="run-label">前进</span></button>
-      <p id="hint">拖动旋转 · 滚轮缩放 · 空格启停</p>
+      <p id="hint">左键调角度 · 中键调机位 · 滚轮远近 · 空格启停</p>
     </div>
 
     <dl id="specs">
@@ -92,6 +123,9 @@
       <div><dt>官方里程</dt><dd id="sp-km">—</dd></div>
       <div><dt>下一节点</dt><dd id="sp-next">—</dd></div>
       <div><dt>驻留块</dt><dd id="sp-chunks">—</dd></div>
+      <div><dt>方向 / 进路</dt><dd id="sp-dir">正向 · 正线</dd></div>
+      <div><dt>线路状态</dt><dd id="sp-align">直线 · 0.0‰</dd></div>
+      <div><dt>停车区间</dt><dd id="sp-zone">—</dd></div>
     </dl>
 
     <div id="notice" role="status"></div>

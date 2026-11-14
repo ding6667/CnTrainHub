@@ -204,3 +204,50 @@ export const MOTION = { maxKmh: 300, defaultKmh: 120, acceleration: 18, decelera
 //                 Chunk = { id, km, kind, seed, nodes: Node[], stationId?, landmarkIds? }
 //                 export function chunkAt(route, km): Chunk
 //                 纯函数，不碰 THREE，便于单测；集成层据此构建 / 回收 Group。
+//
+// ------------------------------------------------------ v2 铁路模拟框架 ----
+// 下面这一层是「真实铁路场景」升级的共享契约，完整定义见 core.js（纯 JS，
+// 不含 three / DOM，数据层可直接在 Node 里单测）。所有新模块只依赖契约，
+// 不互相 import，也不复制数学。
+//
+// core.js       → RAIL（轨距/线间距/站台/栅栏工程尺寸）、DIRECTION、LANE、
+//                 DOOR_STATE、EVENT、SYSTEM_PHASE、createBus / createRegistry /
+//                 defineSystem / createPack / evaluateStop / nextDoorState /
+//                 createTrainSpec / rng / hash32 / poisson / clamp 等。
+//                 StopZone.s0/s1 是线路绝对里程（米）；TrainSpec 是纯数字规格。
+//
+// alignment.js  → createAlignment(route, opts) → Alignment
+//                 Alignment.frameAt(s,{dir,lane,lateral}) → Frame（全局）
+//                 Alignment.localMatrixAt(s,s0,{dir,lane,lateral}) → THREE.Matrix4
+//                 Alignment.localFrameAt / sampleLocal / laneOffset / stationLane /
+//                 depotLane / switchPoints / runningOffset / otherTrackLateral /
+//                 curvatureAt / gradeAt / cantAt / speedLimitAt / flattenSpans
+//                 曲线半径由设计时速决定，车站前后 700 m 强制直线平坡。
+//
+// framework.js  → createJourneyRuntime(pack, host) → Runtime（与省会无关）
+//                 createChunkSystem({buildChunk, release}) → System（通用流式摆位）
+//                 assignPrimary / zonesNear / trainSpecFrom
+//                 Runtime: update(dt) / setRoute / setTravel / setRunning /
+//                 reverse / setDirection / setLane / setTrainSpec / setModel /
+//                 setFormation / setView / setCameraMode / setTheme / setAhead /
+//                 setDoorRequest / dispose
+//
+// packs/*.js    → 省会包。统一导出键：
+//                 { id, name, routes, themes, fleet, views, stationLayouts,
+//                   createTerrain(ctx), createTrack(ctx), createStations(ctx),
+//                   createPassengers(ctx), createTimetable(ctx), createCamera(ctx),
+//                   createSceneSystem(ctx) }
+//                 工厂返回标准 System：{ id, phase, init?, update?(ctx,dt),
+//                 onEvent?, applyTheme?, dispose? }。
+//
+// station-layouts.js → STATION_LAYOUTS / DEPOT_LAYOUTS / layoutFor(id)
+//                 真实站台数与股道数、站台有效长、道岔、停车区间；每条带 sources。
+// track.js      → createTrackSystem(ctx) → System（曲线双线轨道、道岔、栅栏、护坡）
+// passengers.js → createPassengerSystem(ctx) → System；FLEET_CAPACITY / STATION_FLOW
+// schedule.js   → createScheduleSystem(ctx) → System；createTimetable / generateServices
+// camera.js     → createCameraRig(ctx) → System；CAMERA_PRESETS
+// terrain.js    → 保留 v1 全部导出，新增 createTerrainSystem(ctx)
+// stations.js   → 保留 v1 全部导出，新增 createStationSystem / buildStationField
+//
+// 单位再强调一次：Frame.s / StopZone.s0,s1 / Runtime.state.s / visibleChunks 的
+// travelMeters / chunk.km 换算后都是「米」；Route.officialKm / Node.km / 界面显示 = 公里。

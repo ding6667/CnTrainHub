@@ -1,30 +1,26 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import '../detail.css';
 import './style.css';
 import {
-  ORIGIN, geoToXY, CHUNK, CHUNK_KIND, CITY_RADIUS_M,
-  QUALITY, BUDGET, CAMERA, THEMES, VIEWS, MOTION,
+  CHUNK, CHUNK_KIND, QUALITY, CAMERA, THEMES, MOTION,
 } from './config.js';
-import { ROUTES, routeById, nodeAtKm } from './route-data.js';
-import { visibleChunks, segmentLabel } from './stream.js';
-import { STATION_CATALOG, buildStation, buildDepot, disposeStations } from './stations.js';
-import { BUILDING_CATALOG, LANDMARK_IDS, createBuildingFactory } from './buildings.js';
-import { buildTerrain } from './terrain.js';
+import { ROUTES, routeById } from './route-data.js';
+import { segmentLabel } from './stream.js';
 import { makeEnvironment } from '../detail-scene.js';
 import { buildTrain } from '../train-3d.js';
 import MODELS from '../data.json';
+import { createJourneyRuntime, trainSpecFrom } from './framework.js';
+import { EVENT, DOOR_STATE, DIRECTION, LANE, RAIL } from './core.js';
+import HARBIN_PACK from './packs/harbin.js';
 
 /**
- * 哈尔滨线路漫游：把「真实里程」当成唯一的时钟。
+ * 哈尔滨线路漫游 —— 真实铁路模拟（v2）。
  *
- * 大白话：列车自己不动，永远是车头朝 -Z 停在原点；世界按 travel（真实米数）
- * 往 +Z 滚过去。线路被切成 400 m 一块，只留列车前后十来块。
- * 某块该画站房、楼群还是田地，全由 stream.js 按 travel 算出来，
- * 出视野就摘掉 —— 所以几百公里的线路，内存里永远只有几公里。
+ * 大白话：列车自己不动，车头朝 -Z 停在原点；世界由「线路中心线」按真实里程
+ * 反变换过来。framework.js 是与省会无关的运行时（运动 / 分块 / 停站 / 车门 / 事件），
+ * packs/harbin.js 只描述这里用哪些线路、站场、楼和地形，本文件只管渲染器、
+ * 灯光、HUD 和 DOM 控件。三者解耦，换个省会不用复制这份文件。
  */
-
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('stage');
 const $ = (id) => document.getElementById(id);
@@ -52,15 +48,6 @@ if (!ROUTES?.length) {
   }
 }
 
-// 稳定伪随机：同一块每次生成结果一致，不会随帧抖动
-function rng(seed) {
-  let s = (seed >>> 0) || 1;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
-
 function boot() {
   // ------------------------------------------------------------ renderer ---
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -85,17 +72,34 @@ function boot() {
   const rim = new THREE.DirectionalLight(0x74b6ff, 1.6);
   scene.add(rim, rim.target);
 
-  /**
-   * 重烘阴影。shadowMap.autoUpdate=false 时，直接把 needsUpdate 置 true 会让
-   * Three.js 每次新建一张阴影 RenderTarget 而旧的不释放（renderer.info.memory.textures
-   * 每切一次车/主题就 +1）。先显式 dispose 并把 map 置 null，计数才稳定。
-   */
+  /** 重烘阴影前先 dispose 旧 RT，否则每次 needsUpdate 都会泄漏一张纹理。 */
   function refreshShadows() {
     key.shadow.map?.dispose();
     key.shadow.map = null;
     renderer.shadowMap.needsUpdate = true;
   }
 
+  // ------------------------------------------------------------- sky dome ---
+  const skyGeo = new THREE.SphereGeometry(3000, 32, 16);
+  const skyPos = skyGeo.attributes.position;
+  const cTop = new THREE.Color();
+  const cMid = new THREE.Color();
+  const cBot = new THREE.Color();
+  const paintSky = (t) => {
+    cTop.setHex(t.sky[0]); cMid.setHex(t.sky[1]); cBot.setHex(t.sky[2]);
+    const colors = [];
+    for (let i = 0; i < skyPos.count; i += 1) {
+      const y = skyPos.getY(i) / 3000;
+      const c = y > 0.08 ? cMid.clone().lerp(cTop, Math.min(1, (y - 0.08) / 0.7)) : cBot.clone().lerp(cMid, Math.min(1, (y + 0.5) / 0.58));
+      colors.push(c.r, c.g, c.b);
+    }
+    skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  };
+  const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  sky.frustumCulled = false;
+  scene.add(sky);
+
+  // ---------------------------------------------------------------- state ---
   const S = {
     routeId: params.get('route') || ROUTES[0].id,
     modelId: params.get('model') || 'CR400BF-GZ',
@@ -125,109 +129,16 @@ function boot() {
   let envRT = makeEnvironment(renderer, theme);
   scene.environment = envRT.texture;
   scene.environmentIntensity = theme.envIntensity;
-
-  // ------------------------------------------------------------- sky dome ---
-  const skyGeo = new THREE.SphereGeometry(3000, 32, 16);
-  const skyColors = [];
-  const skyPos = skyGeo.attributes.position;
-  const cTop = new THREE.Color();
-  const cMid = new THREE.Color();
-  const cBot = new THREE.Color();
-  const paintSky = (t) => {
-    cTop.setHex(t.sky[0]); cMid.setHex(t.sky[1]); cBot.setHex(t.sky[2]);
-    for (let i = 0; i < skyPos.count; i += 1) {
-      const y = skyPos.getY(i) / 3000;
-      const c = y > 0.08 ? cMid.clone().lerp(cTop, Math.min(1, (y - 0.08) / 0.7)) : cBot.clone().lerp(cMid, Math.min(1, (y + 0.5) / 0.58));
-      skyColors.push(c.r, c.g, c.b);
-    }
-    skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(skyColors, 3));
-    skyColors.length = 0;
-  };
   paintSky(theme);
-  const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
-  sky.frustumCulled = false;
-  scene.add(sky);
 
-  // --------------------------------------------------------------- track ---
-  // 轨道不跟着 chunk 建：一条固定长条 + 按 travel % 间距滚动的枕木/接触网柱，
-  // 一帧只改几个 Object3D.position，draw call 恒定。
-  const track = new THREE.Group();
-  track.name = 'track';
-  scene.add(track);
-  const TRACK_LEN = 4200;
-  const ballast = new THREE.Mesh(
-    new THREE.BoxGeometry(5.2, 0.36, TRACK_LEN),
-    new THREE.MeshStandardMaterial({ color: 0x5a5f68, roughness: 0.95 }),
-  );
-  ballast.position.set(0, -0.5, -TRACK_LEN / 2 + 400);
-  ballast.receiveShadow = true;
-  track.add(ballast);
-  const railMat = new THREE.MeshStandardMaterial({ color: 0xc2cad2, roughness: 0.3, metalness: 0.8 });
-  for (const x of [-0.7175, 0.7175]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.17, TRACK_LEN), railMat);
-    rail.position.set(x, 0.085, -TRACK_LEN / 2 + 400);
-    track.add(rail);
-  }
-  const sleeperCount = 1700;
-  const sleepers = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(2.7, 0.16, 0.28),
-    new THREE.MeshStandardMaterial({ color: 0x4a453f, roughness: 0.9 }),
-    sleeperCount,
-  );
-  {
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < sleeperCount; i += 1) {
-      m.makeTranslation(0, -0.24, -i * 0.62 + 200);
-      sleepers.setMatrixAt(i, m);
-    }
-    sleepers.instanceMatrix.needsUpdate = true;
-    sleepers.frustumCulled = false;
-    sleepers.receiveShadow = true;
-  }
-  track.add(sleepers);
-  // 接触网立柱：一根合并几何，用 InstancedMesh 重复
-  const mastGeo = (() => {
-    const post = new THREE.CylinderGeometry(0.14, 0.16, 8.4, 6);
-    post.translate(0, 3.4, 0);
-    const arm = new THREE.BoxGeometry(3.4, 0.12, 0.12);
-    arm.translate(1.6, 7.0, 0);
-    const parts = [post, arm];
-    const merged = mergeGeometries(parts);
-    parts.forEach((p) => p.dispose());
-    return merged;
-  })();
-  const mastCount = 60;
-  const masts = new THREE.InstancedMesh(
-    mastGeo,
-    new THREE.MeshStandardMaterial({ color: 0x6b727a, roughness: 0.7, metalness: 0.4 }),
-    mastCount,
-  );
-  {
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < mastCount; i += 1) {
-      m.makeTranslation(-3.15, -0.68, -i * 20 + 200);
-      masts.setMatrixAt(i, m);
-    }
-    masts.instanceMatrix.needsUpdate = true;
-    masts.frustumCulled = false;
-  }
-  track.add(masts);
-  // 接触线 / 承力索
-  const wireMat = new THREE.LineBasicMaterial({ color: 0x545b62, transparent: true, opacity: 0.85 });
-  for (const y of [5.4, 6.62]) {
-    const g = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, y, 400), new THREE.Vector3(0, y, -TRACK_LEN + 400),
-    ]);
-    track.add(new THREE.Line(g, wireMat));
-  }
+  const cam = new THREE.PerspectiveCamera(S.fov, innerWidth / innerHeight, CAMERA.near, CAMERA.far);
+  cam.position.set(34, 13, 42);
+  cam.lookAt(0, CAMERA.focusY, -18);
 
-  // -------------------------------------------------------------- actors ---
-  // ---------------------------------------------------------------- 车底 ---
-  // 换车型 / 换 8↔16 编组都要重建车底：逐节车长、受电弓位置、涂装贴图都随编组变。
+  // ----------------------------------------------------------------- 车底 ---
   function trainConfig() {
     const base = MODELS[S.modelId] ?? MODELS['CR400BF-GZ'];
-    // CR200J3-C 实车是 9 辆短编（1 动力 + 7 拖 + 1 控制），不硬凑成 8 辆；
-    // 选「16 辆长编」时按 1 动力 + 14 拖 + 1 控制示意重联长编。
+    // CR200J3-C 实车是 9 辆短编（1 动力 + 7 拖 + 1 控制），16 辆按示意长编重联。
     const n = base.model === 'cr200j' ? (S.formation === 16 ? 16 : 9) : S.formation;
     const gap = base.set.gap;
     const cfg = { ...base, formation: n };
@@ -249,8 +160,26 @@ function boot() {
     return cfg;
   }
 
+  /** 定员按已核实的实车数据按编组线性换算，找不到就按每节 70 人兜底。 */
+  function capacityFor(modelId, n) {
+    const c = HARBIN_PACK.fleetCapacity?.[modelId];
+    const baseN = c?.formation ?? c?.seatsPerCar?.length ?? 8;
+    const cap = Math.round((c?.capacity ?? baseN * 70) * (n / baseN));
+    const per = Math.round(cap / n);
+    const seatsPerCar = Array.from({ length: n }, (_, i) => (
+      i === 0 || i === n - 1 ? Math.round(per * 0.72) : per
+    ));
+    return { capacity: cap, seatsPerCar };
+  }
+
   let train = buildTrain(trainConfig());
   scene.add(train.group);
+
+  function currentSpec() {
+    const cfg = trainConfig();
+    const { capacity, seatsPerCar } = capacityFor(S.modelId, cfg.formation);
+    return trainSpecFrom(S.modelId, cfg, train, capacity, seatsPerCar);
+  }
 
   function syncTrainHud(cfg) {
     $('train-note').textContent = cfg.model === 'cr200j' && cfg.formation === 9
@@ -258,6 +187,24 @@ function boot() {
       : `${S.modelId} · ${cfg.formation} 辆 · ${cfg.set.setLength.toFixed(2)} m`;
     $('livery-tag').textContent = `${S.modelId} · ${cfg.formation} 辆`;
   }
+
+  // ------------------------------------------------------------- runtime ---
+  const runtime = createJourneyRuntime(HARBIN_PACK, {
+    scene, camera: cam, renderer, THREE, domElement: renderer.domElement,
+    startKm: route.nodes?.[0]?.km ?? 0,
+    modelId: S.modelId, formation: S.formation,
+    kmh: S.kmh, accel: S.accel, theme: S.theme, quality: S.quality,
+    view: S.view, ahead: S.ahead, density: S.density,
+    trainSpec: currentSpec(),
+  });
+  S.startKm = route.nodes?.[0]?.km ?? 0;
+
+  const chunkSys = runtime.registry.get('chunks');
+  const camSys = runtime.registry.get('camera');
+  const passengerSys = runtime.registry.get('passengers');
+  const scheduleSys = runtime.registry.get('timetable');
+  const stationSys = runtime.registry.get('stations');
+  camSys?.setTrainSpec?.(currentSpec());
 
   function rebuildTrain() {
     scene.remove(train.group);
@@ -267,231 +214,15 @@ function boot() {
     scene.add(train.group);
     train.setWireframe(S.wire);
     train.materials.glass.emissiveIntensity = S.theme === 'night' ? 0.07 : S.theme === 'dusk' ? 0.04 : 0.01;
+    const spec = currentSpec();
+    runtime.setTrainSpec(spec);
+    camSys?.setTrainSpec?.(spec);
     syncTrainHud(cfg);
-    // 列车阴影是启动那次静态烘的；换车底不重烘，否则每次切换都会新建一张
-    // 阴影 RenderTarget（renderer.info.memory.textures 单调 +1）。
+    // 换车底不重烘阴影：每烘一次都会新建一张 RenderTarget（纹理计数 +1）。
   }
   syncTrainHud(trainConfig());
 
-  const terrain = buildTerrain(theme);
-  scene.add(terrain.group);
-  // terrain 内部已含互斥的「市区真实底图」与「郊外重复块」，不要再单独 add 一份底图；
-  // 这里只取出底图节点，让它按真实里程整体往车后走（列车固定在原点，世界滚动）。
-  const cityBase = terrain.group.getObjectByName('harbin-base');
-  const factory = createBuildingFactory();
-
-  // ------------------------------------------------------------- chunks ---
-  /** id → { group, kind }；只有 [当前块-2, 当前块+ahead] 会留在场景里 */
-  const alive = new Map();
-
-  function releaseChunk(g) {
-    // 子模块内部缓存的几何/材质是共享的，不能在这里 dispose；
-    // 只释放 InstancedMesh 自己的实例缓冲，避免每次流式加载泄漏 GPU buffer。
-    g.traverse((o) => {
-      if (o.isInstancedMesh && typeof o.dispose === 'function') o.dispose();
-    });
-  }
-
-  /** 子模块可能用 id，也可能直接用中文站名/地标名，这里做一次模糊匹配兜底。 */
-  function resolveId(catalog, raw) {
-    if (!raw) return null;
-    const s = String(raw);
-    const list = catalog || [];
-    const hit = list.find((x) => x.id === s)
-      || list.find((x) => x.name === s)
-      || list.find((x) => s.includes(x.name) || x.name.includes(s))
-      || list.find((x) => (x.id && s.includes(String(x.id))));
-    return hit ? hit.id : null;
-  }
-
-  function stationIdFor(c) {
-    const node = (c.nodes || []).find((x) => x.role === 'hub' || x.role === 'local');
-    const raw = c.stationId || node?.stationId || node?.name;
-    // 关键：catalog 外的 51 个沿线站不能再兜底成「哈尔滨站」，否则跑到大连北、
-    // 满洲里都会错显哈站。把中文站名/电报码原样交给 stations.js 的通用中小站模板。
-    return resolveId(STATION_CATALOG, raw) ?? node?.name ?? (typeof raw === 'string' ? raw : null) ?? '哈尔滨';
-  }
-
-  function landmarkIdsFor(c) {
-    const raw = c.landmarkIds && c.landmarkIds.length ? c.landmarkIds : [LANDMARK_IDS?.[0]].filter(Boolean);
-    // route 层的 saint-sophia 等别名由 buildings.js 内部归一化，没命中的原样传下去。
-    return raw.map((x) => resolveId(BUILDING_CATALOG, x) ?? x).filter(Boolean);
-  }
-
-  function depotKindFor(c) {
-    const s = String(c.depot || '');
-    if (s.includes('动车')) return 'emu';
-    if (s.includes('机务') || s.includes('机车')) return 'loco';
-    if (s.includes('车辆')) return 'coach';
-    return s || 'emu';
-  }
-
-  function buildChunk(c) {
-    const g = new THREE.Group();
-    g.name = `chunk-${c.id}`;
-    g.userData.kind = c.kind;
-    const r = rng((c.id * 2654435761) ^ route.id.length * 40503);
-    const night = S.theme === 'night';
-
-    /** 3 类楼各一个 InstancedMesh，一个块最多 3 次 draw call。 */
-    /** 一块只放 1 类楼 = 1 个 InstancedMesh = 1 次 draw call。 */
-    function addBuildings(factor) {
-      const cats = ['residential', 'office', 'commercial'];
-      const cat = cats[Math.abs(c.id) % cats.length];
-      const types = (BUILDING_CATALOG || []).filter((b) => b.category === cat);
-      if (!types.length) return;
-      const type = types[Math.floor(r() * types.length) % types.length];
-      const n = Math.max(0, Math.round(9 * S.density * factor));
-      if (!n) return;
-      const specs = [];
-      for (let i = 0; i < n; i += 1) {
-        const side = i % 2 ? 1 : -1;
-        specs.push({
-          x: side * (38 + Math.abs(c.id % 3) * 44 + r() * 24),
-          z: -((i + 0.5) / n) * CHUNK.length,
-          rotY: r() < 0.25 ? Math.PI / 2 : 0,
-          scale: 0.78 + r() * 0.55,
-          tint: 0.86 + r() * 0.28,
-        });
-      }
-      const mesh = factory.instanced(type.id, specs, { night, seed: c.seed });
-      if (mesh) g.add(mesh);
-    }
-
-    if (c.kind === CHUNK_KIND.HUB && S.stations && c.primary) {
-      const st = buildStation(stationIdFor(c), { theme: S.theme, quality: S.quality, night });
-      if (st) {
-        // 站房原型是跨线高架候车室；若把原点压在正线中心，13 m 高的英雄机位
-        // 会直接钻进屋顶里。示意级场景改成「线侧站房」：往侧方挪开并略缩小，
-        // 股道不必严格对齐，但镜头不会穿模。
-        st.position.set(-30, 0, -CHUNK.length / 2);
-        st.scale.setScalar(0.88);
-        g.add(st);
-        // 枢纽站周边带一排街坊，否则「哈尔滨站」孤零零立在空地上
-        if (S.buildings) addBuildings(0.6);
-      }
-    } else if (c.kind === CHUNK_KIND.DEPOT && S.stations && c.primary) {
-      const d = buildDepot(depotKindFor(c), { theme: S.theme, night });
-      if (d) {
-        // 检修库是 160 m 长的大跨度屋面，别摆在英雄机位（x≈34）正上方
-        d.position.set(-78, 0, -CHUNK.length / 2);
-        d.scale.setScalar(0.85);
-        g.add(d);
-      }
-    } else if (c.kind === CHUNK_KIND.LANDMARK && S.buildings && c.primary) {
-      const ids = landmarkIdsFor(c).slice(0, 2);
-      ids.forEach((id, i) => {
-        const lm = factory.make(id, { night, seed: c.seed + i });
-        if (lm) {
-          lm.position.set((i % 2 ? 1 : -1) * (70 + r() * 40), 0, -120 - i * 170);
-          g.add(lm);
-        }
-      });
-    }
-
-    // 每个城区块 1 类楼；不进 chunk 触发表的 4 个城市地标每 3 块轮换摆一个，
-    // 避免十块窗口里塞进几十个 mesh 把 draw call 顶爆。
-    if (S.buildings && c.kind === CHUNK_KIND.URBAN) {
-      addBuildings(1);
-      if (Math.abs(c.id) % 3 === 0) {
-        const EXTRA = ['lm-dragon-tower', 'lm-grand-theatre', 'lm-sun-island', 'lm-ice-world'];
-        // c.id 可能为负（起点后方窗口），取绝对值再取模
-        const extra = EXTRA[Math.abs(c.id) % EXTRA.length];
-        const landmark = factory.make(extra, { night, seed: c.seed });
-        if (landmark) {
-          const north = extra !== 'lm-dragon-tower';
-          landmark.position.set((north ? -1 : 1) * (95 + r() * 35), 0, -160 - r() * 140);
-          g.add(landmark);
-        }
-      }
-    }
-    // RURAL 不建任何东西：郊外由 terrain 的重复田地/河流/草地全局覆盖
-    return g;
-  }
-
-  function syncChunks(travel) {
-    const raw = visibleChunks(route, travel, S.ahead, CHUNK.behind);
-    // 站区触发窗口有 1200 m，会连着 5~6 块都标成同一个站 / 段 / 地标。
-    // 同一标识只建一次实体（否则一座哈尔滨站被复制好几遍、draw call 翻倍），
-    // 而且要挑「离列车最近」的那一块 —— 若挑窗口最前一块，实体会落在车后 800 m，
-    // 起点就什么都看不到。
-    const chunkKey = (c) => c.stationId || c.depot || (c.landmarkIds || []).join(',') || `k${c.id}`;
-    const best = new Map();
-    for (const c of raw) {
-      if (c.kind !== CHUNK_KIND.HUB && c.kind !== CHUNK_KIND.DEPOT && c.kind !== CHUNK_KIND.LANDMARK) continue;
-      const centerM = c.km * 1000 + CHUNK.length / 2;
-      const d = Math.abs(centerM - travel);
-      const key = chunkKey(c);
-      if (!best.has(key) || d < best.get(key).d) best.set(key, { id: c.id, d });
-    }
-    const list = raw.map((c) => ({
-      ...c,
-      primary: best.has(chunkKey(c)) && best.get(chunkKey(c)).id === c.id,
-    }));
-    const want = new Set(list.map((c) => c.id));
-    for (const [id, entry] of alive) {
-      if (!want.has(id)) {
-        scene.remove(entry.group);
-        releaseChunk(entry.group);
-        alive.delete(id);
-      }
-    }
-    for (const c of list) {
-      const sig = `${c.kind}:${c.primary ? 1 : 0}`;
-      let entry = alive.get(c.id);
-      if (!entry || entry.sig !== sig) {
-        if (entry) {
-          scene.remove(entry.group);
-          releaseChunk(entry.group);
-        }
-        const group = buildChunk(c);
-        alive.set(c.id, { group, sig, kind: c.kind });
-        scene.add(group);
-        entry = alive.get(c.id);
-      }
-      // 真实里程 → 世界 z：s > travel 在前方（-Z），s = travel 正好在列车处
-      entry.group.position.z = travel - c.id * CHUNK.length;
-    }
-    return list;
-  }
-
-  function clearChunks() {
-    for (const [, entry] of alive) {
-      scene.remove(entry.group);
-      releaseChunk(entry.group);
-    }
-    alive.clear();
-  }
-
-  // -------------------------------------------------------------- camera ---
-  const cam = new THREE.PerspectiveCamera(S.fov, innerWidth / innerHeight, CAMERA.near, CAMERA.far);
-  const controls = new OrbitControls(cam, renderer.domElement);
-  controls.enablePan = false;
-  controls.minDistance = CAMERA.minDistance;
-  controls.maxDistance = CAMERA.maxDistance;
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.075;
-  controls.rotateSpeed = 0.62;
-  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: null };
-  controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
-  let focusZ = 0;
-
-  function applyView(id) {
-    const v = VIEWS.find((x) => x.id === id) ?? VIEWS[0];
-    S.view = v.id;
-    focusZ = v.aim ?? 0;
-    // 16 辆长编约 417 m（8 辆约 210 m），机位整体后撤才收得进画面；
-    // 司机视角保持贴脸，不缩放。
-    const span = S.formation === 16 && v.id !== 'cab' ? 1.45 : 1;
-    controls.target.set(0, CAMERA.focusY, focusZ);
-    cam.position.set(v.offset[0] * span, v.offset[1] * span, v.offset[2] * span);
-    cam.lookAt(controls.target);
-    controls.update();
-    $('c-view').value = v.id;
-  }
-  applyView('hero');
-
-  // ------------------------------------------------------------- themes ---
+  // -------------------------------------------------------------- themes ---
   function applyTheme(id) {
     S.theme = id;
     theme = THEMES[id] ?? THEMES.day;
@@ -518,18 +249,15 @@ function boot() {
     scene.environment = envRT.texture;
     scene.environmentIntensity = theme.envIntensity;
     old.dispose();
-    if (terrain.applyTheme) terrain.applyTheme(theme);
-    if (factory.applyTheme) factory.applyTheme(theme);
-    else if (factory.setNight) factory.setNight(id === 'night');
     train.materials.glass.emissiveIntensity = id === 'night' ? 0.07 : id === 'dusk' ? 0.04 : 0.01;
+    runtime.setTheme(id);
+    chunkSys?.clear?.(); // 亮窗/雪色要重建
     refreshShadows();
-    // 主题变了，已建块里的亮窗/雪色要重建
-    clearChunks();
   }
-  applyTheme(S.theme);
 
   function applyQuality(id) {
     S.quality = id;
+    runtime.state.quality = id;
     const q = QUALITY.find((x) => x.id === id) ?? QUALITY[1];
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2) * q.ratio);
     renderer.setSize(innerWidth, innerHeight);
@@ -537,7 +265,16 @@ function boot() {
     refreshShadows();
   }
 
-  // ----------------------------------------------------------------- ui ---
+  function applyView(id) {
+    S.view = id;
+    runtime.setView(id);
+    camSys?.setPreset?.(id);
+    $('c-view').value = id;
+  }
+
+  function setRunning(on) { runtime.setRunning(on); }
+
+  // ----------------------------------------------------------------- UI ---
   const routeSel = $('route-select');
   const startSel = $('start-select');
   const modelSel = $('c-model');
@@ -550,7 +287,6 @@ function boot() {
   }
   routeSel.value = S.routeId;
 
-  // 出发站按线路分组列出全部高铁站，选哪站就从该站的真实累计里程起跑
   function populateStartStations() {
     startSel.innerHTML = '';
     for (const r of ROUTES) {
@@ -575,7 +311,6 @@ function boot() {
     if (first) startSel.value = first.value;
   }
   populateStartStations();
-  S.startKm = route.nodes?.[0]?.km ?? 0;
   syncStartSelection();
 
   for (const [id, m] of Object.entries(MODELS)) {
@@ -588,10 +323,10 @@ function boot() {
   formationSel.value = String(S.formation);
 
   const viewSel = $('c-view');
-  for (const v of VIEWS) {
+  for (const v of HARBIN_PACK.views) {
     const o = document.createElement('option');
     o.value = v.id;
-    o.textContent = v.label;
+    o.textContent = v.label ?? v.id;
     viewSel.appendChild(o);
   }
   viewSel.value = S.view;
@@ -607,35 +342,44 @@ function boot() {
   ];
   for (const [inputId, outId, keyName, fmt] of RANGES) {
     const el = $(inputId);
-    // 滑杆是 0–100 的百分数，内部 S.density 是 0–1，别把 0.75 直接塞给 range
     el.value = String(keyName === 'density' ? S.density * 100 : S[keyName]);
     $(outId).textContent = fmt(Number(el.value));
     el.addEventListener('input', () => {
       const v = Number(el.value);
       S[keyName] = keyName === 'density' ? v / 100 : v;
       $(outId).textContent = fmt(v);
-      if (keyName === 'fov') {
-        cam.fov = v;
-        cam.updateProjectionMatrix();
-      } else if (keyName === 'density' || keyName === 'ahead') {
-        clearChunks();
-      }
+      if (keyName === 'kmh') runtime.state.targetKmh = v;
+      else if (keyName === 'accel') runtime.state.accel = v;
+      else if (keyName === 'fov') {
+        cam.fov = v; cam.updateProjectionMatrix(); camSys?.setFov?.(v);
+      } else if (keyName === 'ahead') { runtime.setAhead(v); }
+      else { runtime.state.density = S.density; chunkSys?.clear?.(); }
     });
   }
-  for (const [id, key] of [['c-follow', 'follow'], ['c-buildings', 'buildings'], ['c-stations', 'stations'], ['c-rural', 'rural'], ['c-wire', 'wire']]) {
+  const CHECKS = [
+    ['c-follow', 'follow'], ['c-buildings', 'buildings'], ['c-stations', 'stations'],
+    ['c-rural', 'rural'], ['c-wire', 'wire'], ['c-passengers', 'passengers'], ['c-schedule', 'schedule'],
+  ];
+  for (const [id, k] of CHECKS) {
     const el = $(id);
-    el.checked = Boolean(S[key]);
+    el.checked = Boolean(S[k] ?? true);
     el.addEventListener('change', () => {
-      S[key] = el.checked;
-      if (key === 'wire') {
-        train.setWireframe(el.checked);
-        refreshShadows();
-      } else {
-        if (key === 'rural') terrain.setVisible?.('rural', el.checked);
-        clearChunks();
-      }
+      S[k] = el.checked;
+      runtime.state[k] = el.checked;
+      if (k === 'wire') { train.setWireframe(el.checked); refreshShadows(); }
+      else if (k === 'follow') camSys?.setFollow?.(el.checked);
+      else if (k === 'passengers') {
+        if (passengerSys) passengerSys.enabled = el.checked;
+        const g = scene.getObjectByName('passengers');
+        if (g) g.visible = el.checked;
+      } else if (k === 'schedule') {
+        if (scheduleSys) scheduleSys.enabled = el.checked;
+      } else if (k === 'rural') {
+        runtime.registry.get('terrain')?.setRural?.(el.checked);
+      } else chunkSys?.clear?.();
     });
   }
+
   $('c-theme').value = S.theme;
   $('c-theme').addEventListener('change', (e) => { applyTheme(e.target.value); syncAll(); });
   $('c-quality').value = S.quality;
@@ -643,30 +387,34 @@ function boot() {
   viewSel.addEventListener('change', (e) => applyView(e.target.value));
   modelSel.addEventListener('change', (e) => {
     S.modelId = e.target.value;
+    runtime.setModel(S.modelId);
     rebuildTrain();
     applyView(S.view);
     notice(`更换车底 · ${S.modelId}`);
   });
   formationSel.addEventListener('change', (e) => {
     S.formation = Number(e.target.value);
+    runtime.setFormation(S.formation);
     rebuildTrain();
     applyView(S.view);
     notice(`编组切换 · ${$('train-note').textContent}`);
   });
+
   startSel.addEventListener('change', (e) => {
     const [rid, kmText] = e.target.value.split('|');
     const r = routeById(rid);
     if (!r) return;
-    route = r;
-    S.routeId = r.id;
-    S.startKm = Number(kmText);
-    travel = S.startKm * 1000;
-    velocity = 0;
+    const km = Number(kmText);
+    if (r.id !== route.id) {
+      route = r;
+      S.routeId = r.id;
+      runtime.setRoute(r.id, km);
+    } else runtime.setTravel(km * 1000);
+    S.startKm = km;
     setRunning(false);
     routeSel.value = r.id;
     $('sp-route').textContent = r.name;
     $('sp-km').textContent = `${r.officialKm} km`;
-    clearChunks();
     const stationName = e.target.selectedOptions[0]?.textContent.split(' · ')[0] ?? '该站';
     notice(`从 ${stationName} 出发 · 向 ${r.name} 终点方向`);
   });
@@ -674,41 +422,117 @@ function boot() {
     route = routeById(e.target.value) ?? ROUTES[0];
     S.routeId = route.id;
     S.startKm = route.nodes?.[0]?.km ?? 0;
-    travel = S.startKm * 1000;
-    velocity = 0;
-    clearChunks();
+    runtime.setRoute(route.id, S.startKm);
+    setRunning(false);
     syncStartSelection();
     $('sp-route').textContent = route.name;
     $('sp-km').textContent = `${route.officialKm} km`;
+    $('c-dir').value = String(DIRECTION.FORWARD);
     notice(`切换线路 · ${route.name}`);
   });
+
+  // ------------------------------------------------------- 新：行车 / 进路 ---
+  const alignment = () => runtime.alignment;
+  function nearestStationS(kind = 'station') {
+    const nodes = (route.nodes || []).filter((n) => (
+      kind === 'depot' ? n.role === 'depot' : n.role === 'hub' || n.role === 'local'
+    ));
+    if (!nodes.length) return runtime.state.s;
+    let best = nodes[0];
+    let bd = Infinity;
+    for (const n of nodes) {
+      const d = Math.abs(n.km * 1000 - runtime.state.s);
+      if (d < bd) { bd = d; best = n; }
+    }
+    return best.km * 1000;
+  }
+
+  $('c-dir').addEventListener('change', (e) => {
+    const d = Number(e.target.value) < 0 ? DIRECTION.REVERSE : DIRECTION.FORWARD;
+    if (d !== runtime.state.dir) {
+      runtime.setDirection(d);
+      notice(d === DIRECTION.REVERSE ? '逻辑掉头 · 行驶方向翻转，车身不转向' : '恢复正向行驶');
+    }
+  });
+  $('a-reverse').addEventListener('click', () => {
+    const d = runtime.reverse();
+    $('c-dir').value = String(d);
+    notice(d === DIRECTION.REVERSE ? '逻辑掉头 · 仅改变行驶方向' : '恢复正向行驶');
+  });
+  $('c-lane').addEventListener('change', (e) => {
+    const v = e.target.value;
+    if (v === LANE.MAIN) {
+      runtime.setLane(LANE.MAIN);
+      notice('进路：正线通过');
+      return;
+    }
+    const isDepot = v === LANE.DEPOT;
+    const center = nearestStationS(isDepot ? 'depot' : 'station');
+    const lane = isDepot ? alignment().depotLane(center) : alignment().stationLane(center, 1);
+    runtime.setLane(lane);
+    // 跳到进岔前，让 300 m 缓和段的横移能实际看见
+    runtime.setTravel(center - lane.approach - 200);
+    setRunning(true);
+    notice(isDepot ? '经道岔进入段管线' : '经进站道岔转入到发线');
+  });
+  $('a-dwell').addEventListener('click', () => {
+    const dir = runtime.state.dir;
+    const nodes = (route.nodes || []).filter((n) => n.role === 'hub' || n.role === 'local');
+    const target = dir === DIRECTION.FORWARD
+      ? nodes.find((n) => n.km * 1000 > runtime.state.s + 400)
+      : [...nodes].reverse().find((n) => n.km * 1000 < runtime.state.s - 400);
+    if (!target) { notice('前方没有可停靠车站'); return; }
+    const center = target.km * 1000;
+    runtime.setLane(alignment().stationLane(center, 1));
+    $('c-lane').value = 'station';
+    runtime.setTravel(center + (dir === DIRECTION.FORWARD ? -320 : 320));
+    runtime.setDoorRequest(null);
+    setRunning(true);
+    notice(`准备进站 · ${target.name}`);
+  });
+  $('c-doors').addEventListener('change', (e) => {
+    const v = e.target.value;
+    runtime.setDoorRequest(v === 'auto' ? null : v === 'open');
+    notice(v === 'auto' ? '车门：自动控制' : v === 'open' ? '请求开门' : '请求关门');
+  });
+  $('c-cammode').addEventListener('change', (e) => {
+    runtime.setCameraMode(e.target.value);
+    camSys?.setMode?.(e.target.value);
+    notice(e.target.value === 'absolute' ? '绝对视角 · 轨旁定点' : '相对视角 · 随车身');
+  });
+
   $('a-reset').addEventListener('click', () => {
     S.startKm = route.nodes?.[0]?.km ?? 0;
-    travel = S.startKm * 1000; velocity = 0; running = false;
+    runtime.setRoute(route.id, S.startKm);
+    setRunning(false);
     applyView('hero');
-    applyTheme('day'); S.theme = 'day'; syncAll();
-    clearChunks();
+    applyTheme('day');
+    syncAll();
+    $('c-dir').value = String(DIRECTION.FORWARD);
+    $('c-lane').value = 'main';
     notice('已回到线路起点');
   });
   $('a-export').addEventListener('click', () => {
     renderer.render(scene, cam);
     const a = document.createElement('a');
     a.href = renderer.domElement.toDataURL('image/png');
-    a.download = `harbin-${route.id}-${travel.toFixed(0)}m.png`;
+    a.download = `harbin-${route.id}-${runtime.state.s.toFixed(0)}m.png`;
     a.click();
   });
+
   function syncAll() {
     for (const [inputId, outId, keyName, fmt] of RANGES) {
       const v = keyName === 'density' ? S.density * 100 : S[keyName];
       $(inputId).value = String(v);
       $(outId).textContent = fmt(v);
     }
-    for (const [id, key] of [['c-follow', 'follow'], ['c-buildings', 'buildings'], ['c-stations', 'stations'], ['c-rural', 'rural'], ['c-wire', 'wire']]) $(id).checked = Boolean(S[key]);
+    for (const [id, key] of CHECKS) $(id).checked = Boolean(S[key] ?? true);
     $('c-theme').value = S.theme;
     $('c-quality').value = S.quality;
     viewSel.value = S.view;
     modelSel.value = S.modelId;
     formationSel.value = String(S.formation);
+    $('c-dir').value = String(runtime.state.dir);
     syncStartSelection();
   }
 
@@ -721,86 +545,137 @@ function boot() {
     noticeTimer = setTimeout(() => el.classList.remove('on'), 2200);
   }
 
+  // ------------------------------------------------------------- events ---
+  const bus = runtime.bus;
+  bus.on(EVENT.ARRIVE, (p) => notice(`到达 ${p.zone?.name ?? '车站'} · 停车区间 ${Math.round(p.zone?.length ?? 0)} m`));
+  bus.on(EVENT.DEPART, () => { if (runtime.state.s > 0) notice('出站 · 车门关闭'); });
+  bus.on(EVENT.SWITCH, (p) => notice(`道岔转换 · ${p.name === 'main' ? '正线' : p.name === 'depot' ? '段管线' : '到发线'}`));
+  bus.on(EVENT.REVERSE, () => notice('逻辑掉头完成 · 车身保持原朝向'));
+  bus.on(EVENT.DOORS, (p) => { if (p.state === DOOR_STATE.OPEN) notice('车门开启 · 站台上下客'); });
+  bus.on(EVENT.SERVICE_DUE, (p) => notice(`时刻表 · ${p.service?.trainNo ?? '车次'} 到发`));
+  bus.on(EVENT.ROUTE_CHANGE, () => chunkSys?.clear?.());
+  // 时刻表的「终到立折」由宿主执行：车体不旋转，只翻行驶方向（需求 1/4）
+  bus.on(HARBIN_PACK.scheduleEvents?.REVERSE_REQUEST ?? 'timetable:reverse-request', (p) => {
+    runtime.setDirection(p?.to ?? DIRECTION.REVERSE);
+    $('c-dir').value = String(runtime.state.dir);
+    notice('时刻表 · 终到立折，逻辑掉头');
+  });
+
   // --------------------------------------------------------------- loop ---
   const clock = new THREE.Clock();
-  let travel = S.startKm * 1000; // 真实累计里程（米），从选中的出发站起算
-  let velocity = 0;
-  let running = false;
   let elapsed = 0;
   let statAt = 0;
   let fpsAcc = 0;
   let fpsFrames = 0;
   let lastKind = '';
-  let lastStation = '';
 
   const runBtn = $('run');
-  function setRunning(on) {
-    running = on;
+  function syncRunButton() {
+    const on = runtime.state.running;
     runBtn.classList.toggle('is-on', on);
     $('run-label').textContent = on ? '停止' : '前进';
   }
-  runBtn.addEventListener('click', () => setRunning(!running));
+  runBtn.addEventListener('click', () => { setRunning(!runtime.state.running); syncRunButton(); });
   addEventListener('keydown', (e) => {
     if (e.code === 'Space' && !/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement?.tagName ?? '')) {
       e.preventDefault();
-      setRunning(!running);
+      setRunning(!runtime.state.running);
+      syncRunButton();
     }
   });
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     elapsed += dt;
-    const target = running ? Math.min(MOTION.maxKmh, S.kmh) / 3.6 : 0;
-    if (velocity < target) velocity = Math.min(velocity + S.accel * dt, target);
-    else velocity = Math.max(velocity - MOTION.deceleration * dt, target);
-    travel += velocity * dt;
+    runtime.update(dt);
 
-    // 世界滚动：枕木 0.62 m 一循环、接触网柱 20 m 一循环，只改两个 position
-    sleepers.position.z = travel % 0.62;
-    masts.position.z = travel % 20;
-    if (terrain.scroll) terrain.scroll(travel);
-    // 市区真实底图以哈尔滨站为原点，随里程整体往车后走；跑出市区就切成郊外重复块
-    if (cityBase) cityBase.position.z = travel;
-    const inCity = travel < CITY_RADIUS_M * 1.2 && S.buildings;
-    if (inCity) terrain.setVisible?.('urban', true);
-    else terrain.setVisible?.('rural', S.rural);
+    const st = runtime.state;
+    // 出站后自动把进路收回正线，否则后续所有 chunk 都带着站台横移
+    if (st.lane && typeof st.lane === 'object'
+        && Math.abs(st.s - st.lane.s) > st.lane.flatHalf + st.lane.transition + 700) {
+      runtime.setLane(LANE.MAIN);
+      $('c-lane').value = 'main';
+    }
+    if (st.doorRequest === null && $('c-doors').value !== 'auto') $('c-doors').value = 'auto';
 
-    const list = syncChunks(travel);
-    const here = list.find((c) => c.id === Math.floor(travel / CHUNK.length));
-    if (here && here.kind !== lastKind) {
-      lastKind = here.kind;
-      const label = { hub: '进入站区', depot: '经过车辆段', urban: '进入哈尔滨城区', landmark: '经过标志建筑', rural: '驶入郊外 · 田野与湿地' }[here.kind];
-      if (label) notice(label);
-    }
-    const nodes = route.nodes || [];
-    const upcoming = nodes.find((n) => n.km * 1000 > travel);
-    if (upcoming && upcoming.name !== lastStation && upcoming.km * 1000 - travel < 3000) {
-      lastStation = upcoming.name;
-      notice(`前方 ${upcoming.name} · ${((upcoming.km * 1000 - travel) / 1000).toFixed(1)} km`);
-    }
-
-    if (S.follow) {
-      controls.target.z += (focusZ - controls.target.z) * 0.08;
-      controls.update();
-    }
     sky.position.copy(cam.position);
     renderer.render(scene, cam);
 
-    // HUD
-    const kmh = velocity * 3.6;
+    // ---- HUD ----
+    const kmh = st.velocity * 3.6;
+    const km = st.s / 1000;
     $('kmh').textContent = kmh.toFixed(0);
     $('gauge-fill').style.width = `${Math.min(100, (kmh / MOTION.maxKmh) * 100)}%`;
-    $('odo').textContent = `${(travel / 1000).toFixed(2)} km`;
-    const st = running ? (kmh < S.kmh - 1 ? '加速' : '运行') : kmh > 0.5 ? '制动' : '停车';
-    if ($('state').textContent !== st) {
-      $('state').textContent = st;
-      $('state').className = running ? 'run' : kmh > 0.5 ? 'brake' : '';
+    $('odo').textContent = `${km.toFixed(2)} km`;
+    const status = st.running ? (kmh < st.targetKmh - 1 ? '加速' : '运行') : kmh > 0.5 ? '制动' : '停车';
+    if ($('state').textContent !== status) {
+      $('state').textContent = status;
+      $('state').className = st.running ? 'run' : kmh > 0.5 ? 'brake' : '';
     }
-    const km = travel / 1000;
+    syncRunButton();
     $('progress-fill').style.width = `${Math.min(100, (km / route.officialKm) * 100)}%`;
     $('progress-label').textContent = `${km.toFixed(1)} / ${route.officialKm.toFixed(1)} km · ${segmentLabel(route, km)}`;
+
+    const dirSign = st.dir === DIRECTION.FORWARD ? 1 : -1;
+    const nodes = route.nodes || [];
+    const upcoming = dirSign > 0
+      ? nodes.find((n) => n.km * 1000 > st.s)
+      : [...nodes].reverse().find((n) => n.km * 1000 < st.s);
     $('sp-next').textContent = upcoming ? `${upcoming.name} · ${upcoming.km.toFixed(0)} km` : '终点';
-    $('sp-chunks').textContent = `${alive.size} / ${S.ahead + CHUNK.behind + 1}`;
+    $('sp-chunks').textContent = `${chunkSys?.size?.() ?? 0} / ${st.ahead + CHUNK.behind + 1}`;
+
+    const laneName = st.lane === LANE.MAIN ? '正线' : st.lane?.type === LANE.DEPOT ? '段管线' : '到发线';
+    $('sp-dir').textContent = `${st.dir === DIRECTION.FORWARD ? '正向' : '反向'} · ${laneName}`;
+
+    const a = runtime.alignment;
+    const curv = a.curvatureAt(st.s);
+    const grade = a.gradeAt(st.s);
+    const radius = Math.abs(curv) > 1e-7 ? Math.round(1 / Math.abs(curv)) : 0;
+    const curveTxt = radius ? `${curv > 0 ? '左' : '右'}曲线 R${radius} m` : '直线';
+    const gradeTxt = `${(grade * 1000).toFixed(1)}‰`;
+    $('sp-align').textContent = `${curveTxt} · ${gradeTxt} · 限速 ${Math.round(a.speedLimitAt(st.s))} km/h`;
+    $('align-note').textContent = `${curveTxt} · ${gradeTxt} · 超高 ${(a.cantAt(st.s) * 180 / Math.PI).toFixed(1)}°`;
+
+    const ev = st.stopEval;
+    const zone = st.stopZone;
+    $('sp-zone').textContent = zone
+      ? `${zone.name} · ${zone.length.toFixed(0)} m · ${ev?.reason === 'OK' ? '全列在区间内' : '未对齐'}`
+      : '—';
+    const doorEl = $('door-note');
+    const doorTxt = {
+      [DOOR_STATE.OPEN]: '车门开启 · 上下客中',
+      [DOOR_STATE.OPENING]: '车门开启中',
+      [DOOR_STATE.CLOSING]: '车门关闭中',
+      [DOOR_STATE.CLOSED]: st.doorsCanOpen ? '可开门 · 两端车门均在区间内' : '车门关闭 · 未在停车区间',
+      [DOOR_STATE.BLOCKED]: '禁止开门 · 车门越出区间',
+    }[st.doorState.state] ?? '车门关闭';
+    doorEl.textContent = `${doorTxt}${ev?.doorMileages?.length ? ` · 余量 ${Math.max(0, Math.min(ev.frontMargin, ev.rearMargin)).toFixed(0)} m` : ''}`;
+    doorEl.className = st.doorState.state === DOOR_STATE.OPEN ? 'hintline is-open'
+      : !st.doorsCanOpen ? 'hintline is-blocked' : 'hintline';
+
+    if (passengerSys?.stats) {
+      const p = passengerSys.stats();
+      $('o-waiting').textContent = `${p.waiting ?? 0} 人`;
+      $('o-onboard').textContent = `${p.onboard ?? 0} / ${p.capacity ?? 0}`;
+      $('o-flow').textContent = `↓${p.alighted ?? 0} ↑${p.boarded ?? 0}`;
+    }
+    if (scheduleSys?.stats) {
+      const t = scheduleSys.stats();
+      $('o-service').textContent = t?.trainNo ?? '示意运行图';
+      $('o-nextstop').textContent = t?.nextStop
+        ? `${t.nextStop} · ${t.nextArrive ?? ''}` : '—';
+    }
+
+    const here = runtime.chunks.find((c) => c.id === Math.floor(st.s / CHUNK.length));
+    if (here && here.kind !== lastKind) {
+      lastKind = here.kind;
+      const label = {
+        [CHUNK_KIND.HUB]: '进入站区', [CHUNK_KIND.DEPOT]: '经过车辆段',
+        [CHUNK_KIND.URBAN]: '进入哈尔滨城区', [CHUNK_KIND.LANDMARK]: '经过标志建筑',
+        [CHUNK_KIND.RURAL]: '驶入郊外 · 田野与湿地',
+      }[here.kind];
+      if (label) notice(label);
+    }
 
     fpsAcc += dt; fpsFrames += 1;
     if (elapsed - statAt > 0.5) {
@@ -820,49 +695,80 @@ function boot() {
     refreshShadows();
   });
 
+  applyTheme(S.theme);
+  applyView('hero');
   requestAnimationFrame(() => {
     refreshShadows();
     renderer.render(scene, cam);
     $('loader').classList.add('done');
-    notice('按真实里程加载 · 可从任意高铁站出发');
+    notice('真实铁路场景 · 曲线 / 坡度 / 双向 / 道岔 / 客流已就绪');
   });
 
+  // ------------------------------------------------------- DEV 调试钩子 ---
   if (import.meta.env.DEV) {
-    window.CNTHUB_JOURNEY = () => ({
-      loaded: Boolean(train.group.parent),
-      route: route.id,
-      travel,
-      km: travel / 1000,
-      kmh: velocity * 3.6,
-      moving: running,
-      chunks: alive.size,
-      chunkKinds: [...alive.values()].map((x) => x.kind),
-      model: S.modelId,
-      formation: S.formation,
-      trainLength: +train.total.toFixed(2),
-      startKm: S.startKm,
-      calls: renderer.info.render.calls,
-      tris: renderer.info.render.triangles,
-      textures: renderer.info.memory.textures,
-      theme: S.theme,
-      quality: S.quality,
-      params: { ...S },
-    });
+    window.CNTHUB_JOURNEY = () => {
+      const st = runtime.state;
+      return {
+        loaded: Boolean(train.group.parent),
+        route: route.id,
+        travel: st.s,
+        km: st.s / 1000,
+        kmh: st.velocity * 3.6,
+        moving: st.running,
+        chunks: chunkSys?.size?.() ?? 0,
+        chunkKinds: runtime.chunks.map((c) => c.kind),
+        model: S.modelId,
+        formation: S.formation,
+        trainLength: +train.total.toFixed(2),
+        startKm: S.startKm,
+        calls: renderer.info.render.calls,
+        tris: renderer.info.render.triangles,
+        textures: renderer.info.memory.textures,
+        theme: S.theme,
+        quality: S.quality,
+        // v2 新增
+        dir: st.dir,
+        lane: st.lane?.type ?? st.lane,
+        doors: st.doorState.state,
+        doorsCanOpen: st.doorsCanOpen,
+        stopZone: st.stopZone?.name ?? null,
+        alignment: {
+          curvature: +runtime.alignment.curvatureAt(st.s).toFixed(7),
+          grade: +runtime.alignment.gradeAt(st.s).toFixed(5),
+          cant: +runtime.alignment.cantAt(st.s).toFixed(4),
+          yaw: +runtime.alignment.yawAt(st.s).toFixed(4),
+        },
+        camera: { mode: st.cameraMode, view: st.view, ...(camSys?.state ?? {}) },
+        passengers: passengerSys?.stats?.() ?? null,
+        schedule: scheduleSys?.stats?.() ?? null,
+        station: stationSys?.state ?? null,
+        params: { ...S, ...st },
+      };
+    };
     window.CNTHUB_JOURNEY.camera = cam;
     window.CNTHUB_JOURNEY.scene = scene;
     window.CNTHUB_JOURNEY.renderer = renderer;
-    window.CNTHUB_JOURNEY.controls = controls;
+    window.CNTHUB_JOURNEY.controls = camSys;
+    window.CNTHUB_JOURNEY.runtime = runtime;
     window.CNTHUB_JOURNEY.api = {
-      setTravel(m) { travel = m; clearChunks(); },
+      setTravel(m) { runtime.setTravel(m); },
       setRunning,
       applyView,
       applyTheme,
       applyQuality,
-      get S() { return S; },
+      reverse: () => runtime.reverse(),
+      setDirection: (d) => runtime.setDirection(d),
+      setLane: (v) => runtime.setLane(v),
+      setCameraMode: (m) => { runtime.setCameraMode(m); camSys?.setMode?.(m); },
+      setDoorRequest: (v) => runtime.setDoorRequest(v),
+      setAutoDwell: (v) => runtime.setAutoDwell(v),
+      get S() { return { ...S, ...runtime.state }; },
       routes: ROUTES,
-      catalog: { stations: STATION_CATALOG, buildings: BUILDING_CATALOG },
+      catalog: {
+        stations: HARBIN_PACK.stationCatalog,
+        buildings: HARBIN_PACK.buildingCatalog,
+        layouts: HARBIN_PACK.stationLayouts,
+      },
     };
   }
-
-  void geoToXY; void ORIGIN; void nodeAtKm; void disposeStations;
 }

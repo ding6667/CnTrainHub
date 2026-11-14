@@ -72,6 +72,16 @@
 #specs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 #specs dd { font-size: 12px; }
 
+/* 新增：运行 / 进路 / 客运 / 时刻表读数 */
+#align-note, #door-note, #o-waiting, #o-onboard, #o-flow, #o-service, #o-nextstop { color: var(--gold); }
+#door-note.is-open { color: #7fe0a8; }
+#door-note.is-blocked { color: var(--red); }
+#o-service, #o-nextstop { font-size: 11px; }
+#c-dir, #c-lane, #c-doors, #c-cammode { max-width: 100%; }
+@media (max-height: 780px) {
+  #specs { max-height: 96px; overflow: auto; }
+}
+
 /* 顶栏线路选择与标签在小屏收起 */
 @media (max-width: 860px) {
   #route-select, #start-select { min-width: 110px; max-width: 145px; font-size: 11px; }
