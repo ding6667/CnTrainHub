@@ -100,6 +100,108 @@
  *     方法 updateProjectionMatrix()；Math 下 Vector3 / Matrix4 / Quaternion /
  *     Euler / Spherical 均为真实类。→ 本文件只用真实存在的 API，不编造类或方法。
  *
+ * [16] 广西新闻网《高清:南宁火车站高铁站台启用》/ 人民网《南宁火车站:高铁时代的"华丽变身"》
+ *     https://pic.gxnews.com.cn/staticpages/20131210/newgx52a70a6e-9187810.shtml
+ *     https://cpc.people.com.cn/n/2013/1211/c87228-23805268.html
+ *     事实：高铁站台长 550 m、宽 10.5 m；站台面与钢轨顶面落差 1.25 m，动车停靠后
+ *     车厢地板与站台齐平、旅客平步进车厢；防滑地砖、白色警示线 + 黄色盲道、雨棚下
+ *     动态电子引导屏、车厢号地标。→ platform 机位取「站台面 1.25 m + 眼高 ≈ 2.85 m」平视。
+ * [17] 科普中国《高站台》 https://cloud.kepuchina.cn/newSearch/imgText?id=6974157197806116864
+ *     事实：高站台标准高出轨面 1.25 m；常配套「无站台柱雨棚」(空间桁架、铝镁锰合金吊顶)。
+ * [18]《高速铁路站台高度及布置》 https://chuimin.cn/lilun/1830071.html
+ *     事实：站台高 1.25 m；站台长按 16 辆 428 m + 余量取 450 m(8 辆 230 m)；安全线
+ *     距站台边缘 1.0 m、黄色并与盲道合并(宽 17~250 mm)；临正线一侧旅客退避 2.0 m
+ *     并设防护栅栏；站台上设停车位置标。→ 站场雨棚 y=5.4、站台面 1.25 的建模口径。
+ * [19] 百度百科《站台安全线》 https://baike.baidu.com/item/%E7%AB%99%E5%8F%B0%E5%AE%89%E5%85%A8%E7%BA%BF/67513267
+ *     事实：我国站台安全线距边缘通用 1 m，高铁站可达 1.5 m；白线或黄线 + 盲道。
+ * [20] Ricoh GR III《Train & Railway Photography: Settings, Recipes, and Tips》
+ *     https://www.ricohpresets.com/blog/ricoh-gr-iii-train-railway-photography-settings-tips
+ *     事实：3/4 视角(对列车 30~45°)同时见车头与侧面、最有立体感；站在长站台一端沿
+ *     纵长拍，柱/雨棚支撑/灯的重复节奏成纵深；贴轨面(rail level)低角度仰拍强调体量；
+ *     铁轨/接触网/站台边缘/栅栏作引导线；始终站安全线内。
+ * [21] Traintrack《Choosing the Right Platform Photo Spot: Perspective, Not Chance》
+ *     https://www.traintrackapp.de/fr/blog/choisir-emplacement-quai-photo
+ *     事实：最佳点常在站台前 1/3、与线路轴成 30~45°、完全在安全线内；站台高度决定
+ *     眼高(齐车窗或低于)；距离越远视角越平；正侧(70~90°)无纵深、近正面(0~15°)显短。
+ * [22] 什么值得买《新干线 300 码疾驰而过,普通人如何拍出震撼大片?》 https://post.smzdm.com/p/aqrp9d8v/
+ *     今日头条《掌握好这几个小技巧,你也能拍出高逼格的铁路照片》 https://www.toutiao.com/article/6767325410347713036/
+ *     事实：站台上方供电线网是理想「框架构图」；站台尽头安全区平视机位、铁轨汇聚成
+ *     引导线；低角度贴地仰拍冲击力最强；跨线桥/天桥高机位俯拍完整呈现列车长度与
+ *     建筑尺度对比；长焦压缩画面。→ hero/side/above 用高机位，nose 用低机位仰拍。
+ * [23] 澎湃《火车迷丨铁路接触网,如何立起来?》 https://m.thepaper.cn/baijiahao_25646885
+ *     事实：接触网支柱高约 10 m、每 50~60 m 一根、带编号；平腕臂/斜腕臂/绝缘子；
+ *     承力索 + 接触线 + 吊弦，接触线在机车正上方。→ nose 低机位抬头能连车头带接触网。
+ * [24] 新华社《一座露天"万国建筑博物馆"》 https://www.geermurb.com/html/1/2025-06/28/10/2025062810_pdf.pdf
+ *     哈尔滨市政府《东北超级酷炫 哈尔"滨"至如归》 https://www.harbin.gov.cn/haerbin/c104696/202606/c01_1130622.shtml
+ *     事实：中央大街 71~75 栋欧式/仿欧式建筑(36 栋保护建筑)，文艺复兴/哥特/折衷/
+ *     巴洛克/新艺术运动并存；老道外中华巴洛克青砖墙、雕花门楼、中式院落穿巴洛克
+ *     外衣(葡萄/石榴/牡丹/蝙蝠/铜钱吉祥纹)；大剧院双曲面「雪色丘峦」→ 混合天际线。
+ * [25] 今日头条《哈尔滨纯新盘,谁是颜值担当?》 https://m.toutiao.com/article/7661819832588845606
+ *     乐居《群力江境·外滩壹号院》 https://m.leju.com/www/news/7464932854368351971.html
+ *     事实：哈西/群力新区高层 24~32 层近 100 m、纯板楼南北通透；立面「铝板 + 巨幕
+ *     玻璃/LOW-E 落地窗」、三段式线条、6 m 金属塔冠、270° 观景阳台、香槟/深咖色、
+ *     真石漆 + 铝板 + 玻璃幕墙组合、精细线条分缝。→ skyline 与楼群材质分化依据。
+ *
+ * [26] 哈尔滨西站站场拓扑（team-lead 中期联网检索；来源：wikiwand / hackcn《哈尔滨西站》、
+ *     东北网 heilongjiang.dbw.cn、工人日报 workercn）
+ *     事实：媒体「10 台 22 线」是简写；实为「横列式一站两场、18 站台面、22 线（含正线
+ *     4 条）」，东高速场 12 面 14 线 / 西普速场 6 面 8 线，共用 12/13 站台。京哈高铁
+ *     正线 Ⅷ/Ⅸ 从高速场中部（7 与 8 站台之间）穿过且**无站台**；站台在正线两侧，
+ *     1/18 为侧式、中间岛式台各夹 2 条到发线。列车进站经咽喉道岔驶入到发线、停在
+ *     站台边——不是永远在正线上。→ 站场以正线为中心，总宽约 226 m（单侧约 113 m）。
+ * [27] 哈西无站台柱大跨度雨棚（来源：heilongjiang.dbw.cn / gf.cabr-fire.com / workercn）
+ *     事实（现实规范）：覆盖全场 83068 ㎡，长 450 m、顺轨柱距 18~21 m、横轨一跨
+ *     40~65 m 跨多个站台；桁架上弦高约 16.7 m、悬挂物下缘至站台面 ≥ 4 m。
+ *     ★但本场景是**示意级近似**：station-realism 实际把屋盖压到 y≈6.7 m
+ *     （檐口 6.2 m，桁架/檩条最高 ~6.7 m），否则会盖过 y=8~12 的站房。
+ *     机位一律以「实际几何 6.7 m」为准，不按 16.7 m 抬避。
+ * [28] 哈西站房（来源：wikiwand / hackcn、heilongjiang.dbw.cn；场景实际几何见 [30]）
+ *     事实：工字形 450 m(南北) × 309.5 m(东西) 跨线高架候车室、5 层、上进下出、
+ *     棕红色陶板外立面（圣索菲亚取色）、拱形、冰花采光天窗；楼扶梯 / 地道口连接站台。
+ * [29] 站台构图参数（来源同 [26]-[28]）
+ *     事实：站台面 y=1.25、岛式宽 12 m / 侧式 9 m、正线线间距 5.0 m、站台长 450 m、
+ *     到发线有效长 650 m、站台边缘距线路中心 1.75 m、站台与车体缝隙 10~20 cm。
+ *     「站台视角」站安全带内侧（距边缘约 1.5~2 m）、眼高 1.6 m，平视车门与四色地标；
+ *     「车头前方低位」贴轨顶上方 1~2 m、距车头 15~30 m。
+ * [30] 本场景站场几何实际包围盒（station-realism 2026-11 直接提供，1 单位=1 m，局部坐标）
+ *     · 雨棚：连片 **opaque** 金属屋面 y≈6.7 m、檐口 6.2 m、桁架/檩条最高 ~6.7 m；
+ *       柱只落股道间。上一版「大面积半透明 X 光片」bug 已修成 opaque。
+ *     · 跨线高架候车室：楼面 y=8、墙顶 12.2、屋面 12.7、冰花天窗 **12.86 m（全场最高几何）**；
+ *       宽 x∈[-56,56]、进深 z∈[-17,17]。
+ *     · 摆位：站场局部原点=中心，集成层放到列车前方约 200 m（世界 z≈-200），
+ *       沿 x、z 均以 0 对称；**中央正线通道 |x|<9.75 透空**（列车 x≈0 可见），
+ *       站台面 y=1.25 在 |x|≥11.5。
+ *     · 站台横断面精确包围盒（station-realism 复核，最内侧站台中心 px=+17.5、宽 12
+ *       → 站台面 x∈[11.5,23.5]，左侧镜像 -17.5）：雨棚柱只在 x=9.6 / 25.4（股道间、
+ *       每 24 m 一根 0.3×0.3 细杆），站房落地柱 |x|>31 → **站台上方无柱**；
+ *       但高架候车室↔站台楼扶梯口有实体：楼梯 10 级 **x∈[14.2,16.8]、y 1.875→7.5**、
+ *       z∈[23,31]（局部），扶梯斜梁 x∈[18.55,19.45]、电梯井 x∈[21,23.2]，
+ *       LED 屏 x≥15.8、座椅 x≥16.2、灯柱 x=17.5、站台屏/吊牌 z=±94.5/±135。
+ *       → 站站台的低机位相机 x 取 **13.0~14.0 空档**（side/platform/trackside 统一 13.5）
+ *       可同时避开以上全部实体；站台面 [11.5,23.5] 内仍成立。
+ *     · 中央 |x|<9.75 在屋面标高 y=6.7 本就透空（仅 x∈[-2.4,2.4] 一条半透明采光带
+ *       y=6.72），opaque 屋面从 |x|=10.35 起；故危险区 |x|<113 且 y∈[6.2,12.86]
+ *       对中央通道是保守判定（无害），俯瞰机位 y>14 正利用这段透空看列车。
+ *
+ * 【机位重设（v2.4，按 station-realism 实际 6.7 m 几何；作废 v2.3 的 16.7 m / 端头外假设）】
+ *   ★ 关键修正：v2.3 误把 16.7 m 规范值当实际几何，且假设雨棚中心 z=0、端头 |z|=225。
+ *     实际屋盖只有 6.7 m、站房顶 12.86 m，站场中心还在 z≈-200 且随里程滚动，
+ *     「端头之外 |z|>225」不可靠；v2.3 的 hero(y=11) 恰好落进站房 8~12.86 高度带，
+ *     且从 y>6.7 侧上方看车体的视线会穿过 opaque 连片屋面 → 车被挡。
+ *   稳健原则（只依赖 y 与 x，与滚动的 z 无关）：
+ *    (a) 看车体/站台细节 → **低机位 y<6.0**（雨棚檐口 6.2 之下、接触网 5.3 之下），
+ *        视线全程 y<6.0，从中央透空通道 |x|<9.75 或站台/股道间 (|x|≥11.5) 取景；
+ *        这样无论站场滚到哪里都不穿屋面、不依赖半透明。
+ *    (b) 俯瞰全貌/站房 → **高空 y>14**（高于 12.86 m 站房顶）：above、skyline、orbit，
+ *        可经中央透空带看到列车。
+ *    · hero/station：车后 (+Z) 雨棚下低机位纵深/长焦，顺股道看列车+两侧站台+桁架+远端站房；
+ *    · side：站台/股道间低机位正侧平视车身腰线；platform：站台面 y=1.25+眼高1.6=2.85
+ *      站在 |x|≥11.5 站台安全带内侧；rear：中央通道低机位回望；trackside：站台固定点；
+ *    · cab / nose / above / skyline / orbit 数值不动（cab 为 v3 实测最佳画面）。
+ *   cab 防穿模、near 0.15↔0.5、轨顶净空 0.6 / pan 下限 -12 / 同步抬升一律保留。
+ *   站台在列车局部系的精确 x 随 alignment 的 lane 横移变化（列车恒在局部原点），
+ *   platform / trackside 的站台相对位置属示意级近似。
+ *
  * ═══════════════════════════════════════════════════════════════════════════
  * 二、本文件设计（大白话）
  * ═══════════════════════════════════════════════════════════════════════════
@@ -137,6 +239,12 @@
  *   带阻尼：state 是唯一目标数据源，disp 每帧用 1-exp(-k*dt) 朝 state 收敛，
  *   相机由 disp 纯函数算出来，杜绝旧版 controls.target.z += (focusZ-z)*0.08
  *   那种「数据源与显示值混在一起、切机位后慢慢爬」的累积误差。
+ *
+ * ★ 平滑（v2.2，针对用户「开车有时一闪」）：dt 先钳到 0~0.05 s 再算阻尼系数，
+ *   杜绝异常大步长（切标签页回来 / 调试直调）让显示值一步跳到目标；followShift
+ *   不再乘 dirRef，逻辑掉头时观察中心不再瞬间翻符号；setTrainSpec 不再硬 snap，
+ *   换车型/编组的长编后撤交给阻尼平滑收敛。切机位 / 换模式 / init 仍即时定位
+ *   （机位语义 + 集成层 setView 要确定性），但开车、换向、换编组的突跳已消除。
  *
  * ★ 驾驶室防穿模策略（需求 7 重点，写清楚给集成层看）：
  *   主策略 = **把相机放到车壳体外、鼻锥前沿再往前一点点**，绝不进车体网格。
@@ -190,47 +298,57 @@ export const CAMERA_PRESETS = [
   {
     id: 'cab', label: '司机视角', mode: 'relative',
     offset: [0, 2.9, -106], aim: [0, 0.8, -306], fov: 60,
-    note: '驾驶室：offset 仅示意，运行时按 train.noseZ / height 重算（相机 z=noseZ-0.6 在车壳体外），near 压到 0.15。朝 -Z 略向下看前方 200 m。',
+    note: '驾驶室：offset 仅示意，运行时按 train.noseZ / height 重算（相机 z=noseZ-0.6 在车壳体外），near 压到 0.15。朝 -Z 略向下看前方 200 m。v3 实测全场最佳画面（无砟轨道板/接触网腕臂/雨棚桁架/站台屏/护栏），保持不动；相机在中央透空通道 y=2.9 低于 6.2 檐口。[1][3][5][10][30]',
   },
   {
     id: 'hero', label: '英雄机位', mode: 'relative',
-    offset: [38, 14, 58], aim: [0, 2.4, -46], fov: 52,
-    note: '车后(+Z)右上方看车头 3/4 侧与前方站房，视点在 -Z。修正旧版放错方向朝车尾看的问题。',
+    offset: [13.5, 4.2, 112], aim: [0, 2.3, -40], fov: 56,
+    note: '站台上、车尾后 7 m 的低机位（x=13.5 在站台带 11.5~23.5 内且避开楼扶梯 14.2~16.8，y=4.2 低于檐口 6.2/接触网 5.3）：车体占画面主体，同时能看到紧贴的站台、黄盲道、四色地标、雨棚柱列与接触网。首屏不再把列车放成远处小点。[26][27][30][20][21][22]',
   },
   {
-    id: 'side', label: '侧向平视', mode: 'relative',
-    offset: [76, 5.5, 6], aim: [0, 2.4, -12], fov: 48,
-    note: '正侧平视，yaw 接近 90°，看车身腰线与车窗带。',
-  },
-  {
-    id: 'above', label: '俯瞰线路', mode: 'relative',
-    offset: [0, 118, 96], aim: [0, 0, -130], fov: 52,
-    note: '正上方偏后大俯角俯瞰线路与站场；16 辆长编自动整体后撤收进画面。',
+    id: 'side', label: '站台侧视', mode: 'relative',
+    offset: [13.5, 3.4, 6], aim: [0, 2.2, -6], fov: 50,
+    note: '站台/股道间低机位正侧平视：相机 x=13.5 在站台面 [11.5,23.5] 内、距车体侧面约 12 m（8~15 m 建议区间），y=3.4 在雨棚下，看清车身腰线/车窗带/车门与邻侧站台。x 由 16 调到 13.5 以避开高架候车室↔站台楼扶梯口楼梯实体 x∈[14.2,16.8]（station-realism 提供包围盒），与 platform 同空档，并避开 LED 屏(≥15.8)/座椅(≥16.2)/灯柱(17.5)。视线 y 3.4→2.2 全程低于 6.2 檐口，从 opaque 屋面下方平视，不依赖半透明。[29][30][21]',
   },
   {
     id: 'station', label: '进站视角', mode: 'relative',
-    offset: [-36, 17, 72], aim: [0, 3.5, -170], fov: 46,
-    note: '低机位长焦看前方进站站房，相机在车后 +Z、视点在远处 -Z。',
+    offset: [12, 3.6, 175], aim: [0, 2.4, -160], fov: 36,
+    note: '车后低机位长焦顺股道看进站：相机 y=3.6 在雨棚下、x=12 站台内，fov36 压缩看整列车纵列 + 两侧站台 + 桁架(仰视) + 远端跨线站房，雨棚柱列/安全线作引导线。视线 y 3.6→2.4<6.0 全程在屋面下方，彻底避开 v2.2 站内 y=8.5 半透明 X 光片 overdraw 疑似崩溃（该 bug 已由 station-realism 修成 opaque）。[22][27][29][30]',
+  },
+  {
+    id: 'platform', label: '站台平视', mode: 'relative',
+    offset: [13.5, 2.85, -30], aim: [0, 2.2, -90], fov: 44,
+    note: '站在 |x|≥11.5 站台安全带内侧（x=13.5）、站台面 1.25 m + 眼高 1.6 m = y=2.85，平视/略俯停靠列车，看清车门、车窗带、站台白线/黄色盲道、四色地标与雨棚柱列纵深。相机 x=13.5 在车体(半宽1.68)之外不钻车体、y=2.85<6.2 不碰屋面；水平视线全程在 opaque 屋盖下净空内。[16][17][18][19][29][30][20][21] 站台相对 x 随 alignment lane 横移，示意级近似。',
+  },
+  {
+    id: 'nose', label: '车头前方低位', mode: 'relative',
+    offset: [3.4, 1.1, -132], aim: [0, 3.4, -104], fov: 46,
+    note: '贴轨顶上方 1.1 m（≥0.6 净空）、距车头约 27 m（15~30 m 建议区间）、x=3.4 在中央透空通道，仰看流线型车头 + 车顶 + 接触网（支柱约 10 m、每 50~60 m 一根）作框架。运行时按 noseZ 平移，8/16 辆都恒在车头前，不进车体。y=1.1 远低于 6.2 檐口。[22][23][29][30]',
+  },
+  {
+    id: 'above', label: '俯瞰线路', mode: 'relative',
+    offset: [0, 110, 60], aim: [0, 1.2, -128], fov: 52,
+    note: '高空俯瞰 y=110 m 远高于全场最高几何 12.86 m（冰花天窗）：看整片 opaque 大跨雨棚屋面、工字形跨线站房、两端咽喉与站台全貌，并经中央 |x|<9.75 透空带看到正线列车。16 辆长编自动整体后撤收进画面。[22][27][28][30]',
   },
   {
     id: 'skyline', label: '城市天际线', mode: 'relative',
-    offset: [140, 82, 196], aim: [0, 24, -180], fov: 44,
-    note: '远景高机位看城市天际线，distance≈405 m 落在 8~600 clamp 内。',
+    offset: [132, 78, 168], aim: [0, 20, -150], fov: 46,
+    note: '远景高机位(|x|=132 站场外、y=78>12.86 最高几何)看哈尔滨混合天际线 + 线路与站场屋盖。distance≈349 m 落在 8~600 clamp 内。[24][25]',
   },
   {
     id: 'rear', label: '车尾回望', mode: 'relative',
-    offset: [24, 9, -78], aim: [0, 2.4, 66], fov: 52,
-    note: '刻意回望：相机在车头前方(-Z)、视点在车后(+Z)，看整列车与车尾。这是唯一朝车尾的机位，不是方向 bug。',
+    offset: [6, 3.4, -140], aim: [0, 2.4, 90], fov: 50,
+    note: '刻意回望：车头前方(-Z)中央透空通道低机位 x=6、y=3.4<6.2，顺股道看整列车与车尾 + 两侧站台 + 桁架(仰视)。视线 y 3.4→2.4 全程在 opaque 屋面下。唯一朝车尾的机位，不是方向 bug。[22][30]',
   },
   {
     id: 'trackside', label: '轨旁固定机位', mode: 'absolute',
-    offset: [16, 3.2, 0], aim: [0, 2.4, -70], distance: 30, yaw: 1.35, pitch: 0.1, fov: 52,
-    note: '轨旁世界固定锚点(offset)，不随列车跑动；左键绕该点 orbit、滚轮改到锚点距离，列车（滚动的世界景物）驶过画面。',
+    offset: [0, 2.4, 0], aim: [0, 2.4, -60], distance: 13.6, yaw: 1.44, pitch: 0.03, fov: 48,
+    note: '轨旁世界固定锚点(线路中心)，不随列车跑动；相机由球坐标落在 x≈13.5、y≈2.81（≈站台面 1.25+眼高 1.6）的站台上，沿股道低角看列车驶过 + 站台，视线 y 2.81→2.4 全程低于 6.2 檐口。distance 由 16 调到 13.6 使相机 x 从 15.9 移到 13.5，避开楼扶梯口楼梯实体 x∈[14.2,16.8]（station-realism 提供包围盒）。左键绕该点 orbit、滚轮改到锚点距离。[7][9][22][30]',
   },
   {
     id: 'orbit', label: '自由环绕', mode: 'absolute',
-    offset: [0, 2.4, 0], aim: [0, 2.4, -60], distance: 90, yaw: 0.25, pitch: 0.35, fov: 52,
-    note: '自由相机：绕线路中心这一世界固定点 orbit，纯绝对机位，可任意旋转/缩放。',
+    offset: [0, 2.4, 0], aim: [0, 2.4, -60], distance: 110, yaw: 0.25, pitch: 0.35, fov: 50,
+    note: '自由相机：绕线路中心这一世界固定点 orbit，初始高空俯瞰(y≈40 m>12.86 最高几何)，可任意旋转/缩放；用户想贴站台细节时自行往下调 pitch 到 y<6.0 雨棚下。[7][9][30]',
   },
 ];
 
@@ -255,6 +373,13 @@ const DAMP = 9;                         // 阻尼系数，k = 1-exp(-dt*DAMP)
 const CAB_TILT = 0.025;                 // rad ≈1.4°，cab 基础下俯
 const CAB_BACK = 0.6;                   // 相机放到鼻锥前沿外侧 0.6 m
 const CAB_AHEAD = 200;                  // lookAt 前方距离（米）
+
+/**
+ * 按 noseZ 绝对定位的机位：不叠 formationBack(长编后撤) / followShift(里程呼吸)，
+ * 否则 16 辆时相机会相对车头漂移。v2.4 起只有 nose 需要；hero/station 已改为雨棚下
+ * 低机位(y<6.0)，长编后撤只改 z 不改 y，安全且保留「收进更长列车」的既有语义。
+ */
+const ANCHORED_VIEWS = new Set(['nose']);
 
 /** ctx.train 与 setTrainSpec 都没给时的 8 辆示意规格，保证 cab 有 noseZ 可用。 */
 const FALLBACK_TRAIN = Object.freeze({
@@ -438,6 +563,8 @@ export function createCameraRig(ctx, opts = {}) {
     if (!camera || disposed) return;
     const train = resolveTrain();
     const isCab = state.preset === 'cab';
+    // 按 noseZ 定位的机位不叠长编后撤 / 里程呼吸（见 ANCHORED_VIEWS）。
+    const isAnchored = ANCHORED_VIEWS.has(state.preset);
 
     // ---- 1) 目标 anchor：写回 state.anchor（HUD 读它）----
     let ax, ay, az;
@@ -449,20 +576,25 @@ export function createCameraRig(ctx, opts = {}) {
       ax = baseAnchor[0] + pan[0]; ay = baseAnchor[1] + pan[1]; az = baseAnchor[2];
     } else {
       let followShift = 0;
-      if (state.follow && Number.isFinite(ctxRef?.s)) {
-        // 示意级近似：世界本来就在滚动，默认不额外跟随；开了就随里程极轻微呼吸
-        followShift = Math.sin(ctxRef.s * 0.0015) * 1.2 * dirRef;
+      if (!isAnchored && state.follow && Number.isFinite(ctxRef?.s)) {
+        // 示意级近似：世界本来就在滚动，默认不额外跟随；开了就随里程极轻微呼吸。
+        // 故意不乘 dirRef —— 逻辑掉头时 anchor.z 不再瞬间翻符号（消除「换向一闪」）。
+        followShift = Math.sin(ctxRef.s * 0.0015) * 1.2;
       }
       ax = baseAnchor[0] + pan[0];
       ay = baseAnchor[1] + pan[1];
-      az = baseAnchor[2] + formationBack(train) + followShift;
+      // nose 跳过长编后撤（否则相对车头漂移）；其余相对机位保留后撤（阻尼平滑）。
+      az = baseAnchor[2] + (isAnchored ? 0 : formationBack(train)) + followShift;
     }
     // 观察中心也不许沉到轨顶以下，避免 HUD 与实际画面给出互相矛盾的高度。
     ay = Math.max(ay, MIN_EYE_Y);
     state.anchor[0] = ax; state.anchor[1] = ay; state.anchor[2] = az;
 
     // ---- 2) 阻尼：disp 朝 state 收敛（state 是唯一数据源，无累积误差）----
-    const k = snap ? 1 : (dt > 0 ? 1 - Math.exp(-dt * DAMP) : 0);
+    // dt 钳到 0~0.05 s，杜绝异常大步长（切标签页回来、调试直调）让 disp 一步跳到 state；
+    // snap（切机位/换模式/init）仍为 1 = 立即定位，保证机位切换的确定性。
+    const step = clamp(dt, 0, 0.05);
+    const k = snap ? 1 : (1 - Math.exp(-step * DAMP));
     disp.distance = lerp(disp.distance, state.distance, k);
     disp.yaw = lerp(disp.yaw, state.yaw, k);
     disp.pitch = lerp(disp.pitch, state.pitch, k);
@@ -514,8 +646,18 @@ export function createCameraRig(ctx, opts = {}) {
     state.preset = p.id;
     if (!options.keepMode) state.mode = p.mode === 'absolute' ? 'absolute' : 'relative';
 
-    // 相对 → 锚点 = 车身局部观察中心(preset.aim)；绝对 → 锚点 = 世界固定点(preset.offset)
-    baseAnchor = (state.mode === 'absolute' ? p.offset : p.aim).slice();
+    // nose（车头前方低位）恒贴 noseZ：把 offset/aim 的 z 按当前编组相对 8 辆的位移平移，
+    // 让相机在 8 辆(noseZ=-105) / 16 辆(noseZ=-208) 时都落在车头前同一距离，绝不进车体。
+    let offArr = p.offset;
+    let aimArr = p.aim;
+    if (p.id === 'nose') {
+      const shift = resolveTrain().noseZ - FALLBACK_TRAIN.noseZ;
+      offArr = [p.offset[0], p.offset[1], p.offset[2] + shift];
+      aimArr = [p.aim[0], p.aim[1], p.aim[2] + shift];
+    }
+
+    // 相对 → 锚点 = 车身局部观察中心；绝对 → 锚点 = 世界固定点
+    baseAnchor = (state.mode === 'absolute' ? offArr : aimArr).slice();
     pan = [0, 0];
 
     // 球坐标一次性同步：absolute 且带显式 distance/yaw/pitch 就直接用，否则由 offset-aim 反推
@@ -525,7 +667,7 @@ export function createCameraRig(ctx, opts = {}) {
       state.pitch = clamp(Number.isFinite(p.pitch) ? p.pitch : 0, PITCH_MIN, PITCH_MAX);
     } else {
       const sp = offsetToSpherical(
-        p.offset[0] - p.aim[0], p.offset[1] - p.aim[1], p.offset[2] - p.aim[2],
+        offArr[0] - aimArr[0], offArr[1] - aimArr[1], offArr[2] - aimArr[2],
       );
       state.distance = clamp(sp.distance, MIN_DIST, MAX_DIST);
       state.yaw = sp.yaw;
@@ -560,7 +702,10 @@ export function createCameraRig(ctx, opts = {}) {
   function setTrainSpec(spec) {
     if (spec && typeof spec === 'object') {
       specRef = spec;
-      applyCamera(0, true); // 换车型/编组立即按新 noseZ/height 重算（cab 自动适配长编）
+      // 换车型/编组不再硬 snap：cab / nose 的相机位置每帧直接由 train.noseZ 算，
+      // 其余机位的长编后撤交给每帧阻尼平滑收敛，消除「换编组一闪」。
+      // 仍调一次 applyCamera(0,false) 刷新 near/fov 与 HUD 的 state.anchor。
+      applyCamera(0, false);
     }
     return getState();
   }

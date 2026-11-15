@@ -6,13 +6,17 @@
  *    底面严格贴在 y=0，绝不会伸到轨道下面去；集成层会把楼整体放到 |x|>=30 m 之外。
  *  - 一共 4 类楼（住宅 residential / 办公 office / 商业 commercial / 地标 landmark），
  *    普通楼走 InstancedMesh 批量（同一类型几十栋一次 draw call），地标是单独 Group。
- *  - 立面全部画在「可平铺的 CanvasTexture」上：砖缝、双层防冻窗、阳台栏板、俄式白色
- *    线脚、雪檐口都画在贴图里；整模块只用 6 张贴图（一张贴图 = 4 开间 x 4 层，可平铺）。
+ *  - 立面全部画在「可平铺的 CanvasTexture」上（512px，4 开间 x 4 层）：黄/红砖错缝
+ *    砖块、真石漆颗粒、石材/铝板分格、玻璃幕墙天空反射、双层防冻窗、阳台栏板、
+ *    窗帘百叶、空调外机、俄式白色线脚、雪檐口都画在贴图里；整模块仍只用 6 张贴图。
+ *    每个窗格用确定性 hash 给不同反射/明暗/窗帘/外机，repeat 到高层也不显死板。
  *  - 寒夜亮窗：这 6 张贴图是「同一张 canvas 重绘」切换昼/夜版，材质 map 与 emissiveMap
  *    指向同一张贴图，夜里把 emissiveIntensity 拉高，贴图里画亮的窗就会发光。
  *  - 几何走「同材质 mergeGeometries 合并 + 缓存复用」：一个楼型 = 一个合并几何 + 一个
  *    材质 = 一个 InstancedMesh = 1 个 draw call。坡屋顶、塔尖、柱廊、阳台块都并进同一
  *    几何，用贴图顶部的「雪白檐口带」当采样点染成雪顶/浅色混凝土色。
+ *  - 每栋普通楼额外补「底层商铺/入口带」+「屋顶设备组（机房/水箱/冷却塔/天线/
+ *    女儿墙）」几何，破「纯盒子」感；仍并进同一合并几何，不增 draw call。
  *  - 外观只做「示意级复刻」，不用任何第三方图片/模型，不复制受版权保护的精确图纸。
  *
  * 依赖：three 0.180；addons 走 'three/addons/utils/BufferGeometryUtils.js'；纯 ES module。
@@ -105,6 +109,38 @@
  *    合肥日报《穹顶与星辰》(太阳岛/松花江) https://newspaper.hf365.com/hfwb/pc/content/202509/22/content_525804.html
  *    说明：太阳岛为松花江北岸景区、冰雪大世界为冰雪雕塑主题园区，二者仅做主题示意
  *    （绿色基座 + 太阳雕塑 / 半透明冰晶城垛 + 彩灯），不追求精确复原。
+ *
+ * R13 哈尔滨新区（哈西/群力）高层立面材质（v2.2 写实化新增）
+ *    今日头条《哈尔滨纯新盘,谁是颜值担当?》 https://m.toutiao.com/article/7661819832588845606
+ *    乐居《群力江境·外滩壹号院楼盘测评》 https://m.leju.com/www/news/7464932854368351971.html
+ *    克而瑞好房点评《哈尔滨群力西核心区新晋地王产品定位分析报告》
+ *    https://www.haofangdp.com/fjdph/newslist/reviewconsultation?itemId=7486214994259539523
+ *    事实：24~32 层近 100 m 纯板楼、南北通透；立面「铝板 + 巨幕玻璃 / LOW-E 落地窗」、
+ *    三段式线条、金属塔冠(约 6 m)、270° 观景阳台、香槟/深咖配色、真石漆 + 铝板 +
+ *    玻璃幕墙组合、精细线条分缝、公建化极简。→ slab 真石漆/铝板分格、glass 浅色
+ *    铝合金龙骨 + 层间实墙带、平屋顶出屋面机房/水箱/天线与塔冠的写实依据；新增
+ *    res-haxi-alu-tower / off-alu-curtain 两类，避免「一水儿蓝玻璃」。
+ *
+ * R14 中华巴洛克砖雕与中西合璧细部
+ *    新华社《一座露天"万国建筑博物馆"》 https://www.geermurb.com/html/1/2025-06/28/10/2025062810_pdf.pdf
+ *    哈尔滨市政府《东北超级酷炫 哈尔"滨"至如归》 https://www.harbin.gov.cn/haerbin/c104696/202606/c01_1130622.shtml
+ *    事实：老道外青砖墙、雕花门楼、中式四合院穿巴洛克华丽外衣，葡萄/石榴/牡丹/蝙蝠/
+ *    铜钱吉祥纹样，老字号牌匾与西式立柱共墙；「一楼一策、修旧如旧」。→ brickred 红砖
+ *    错缝 + 拱券窗 + 拱心石/砖雕点饰、底层店招横匾的依据。
+ *
+ * R15 中央大街新艺术运动 / 折衷主义商厦
+ *    中国网《黑龙江哈尔滨:一座露天的"万国建筑博物馆"》
+ *    https://big5.china.com.cn/gate/big5/travel.china.com.cn/txt/2025-06/27/content_117951004.shtml
+ *    事实：中央大街 71~75 栋欧式及仿欧式建筑(36 栋保护建筑)，文艺复兴/哥特/拜占庭/
+ *    古典主义/折衷主义/新艺术运动并存，曲线构图山墙与窗楣、大橱窗、转角穹顶塔。
+ *    → com-art-nouveau（石材曲线窗楣商厦）与 office 竖向壁柱/线脚的依据。
+ *
+ * R16 寒地建筑屋顶设备与底层商铺（示意级工程做法，非精确图纸）
+ *    科普中国《高站台》 https://cloud.kepuchina.cn/newSearch/imgText?id=6974157197806116864
+ *    配合 R4（寒地防冻）、R1（前店后宅）与寒地通用工程常识：平屋顶普遍有出屋面电梯
+ *    机房/楼梯间、水箱、冷却塔、通信/避雷天线、女儿墙；沿街一层多为商铺（门套/雨棚/
+ *    店招/橱窗），上层住宅/办公。程序化用 solidBox/solidCyl 合并进同一几何（不增
+ *    draw call），仅示意量级与层次，不冒充任何具体建筑图纸。
  * RESEARCH_END
  */
 
@@ -115,8 +151,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const TILE_M = 12;      // 一张立面贴图横向 = 4 个 3 m 开间
 const FLOOR_M = 12.8;   // 纵向 = 4 个 3.2 m 层高
 const SNOW_UV = [0.5, 0.02]; // 贴图最顶部那条「雪白檐口带」，坡顶/平顶/混凝土部件采这里
-const TEX = 256;
-const CELL = 64;        // 贴图里 4x4 个窗单元，每格 64 px
+const TEX = 512;        // 贴图分辨率 256→512：窗格/砖缝/反射细节翻倍，贴图张数仍固定 6 张
+const CELL = 128;       // 贴图里 4x4 个窗单元，每格 128 px（512 / 4）
+const SNOW_BAND = 18;   // 第 0 行顶部纯雪白带高度（> SNOW_UV 的 v*TEX≈10.2px），供 solidBox 采样
 const UP = new THREE.Vector3(0, 1, 0);
 
 // 线性同余随机：seed 决定一栋楼阳台/烟囱/亮窗的确定性小变化
@@ -175,97 +212,233 @@ function setAllUV(geo, u, v) {
  * glass=白天玻璃, frame=窗框 nframe=夜窗框, balcony=阳台栏板 nbal=夜阳台, mortar=砖缝。
  */
 const FAC = {
+  // 黄砖清水墙（俄式/苏式，白色线脚）、红砖（中华巴洛克，砖雕）、真石漆板楼（新区高层）、
+  // 米黄石/铝板办公、玻璃幕墙（铝合金浅色龙骨，不再纯深蓝）、商厦暖黄。
   brick:    { w: '#cdb07c', nw: '#241f18', corn: '#f0e6cf', ncor: '#3b4350', glass: '#5b7387', frame: '#eaddc1', nframe: '#2b2723', balcony: '#ded2b4', nbal: '#23262c', mortar: 'rgba(120,90,55,.20)' },
   brickred: { w: '#ac5b41', nw: '#231814', corn: '#ecddc9', ncor: '#39404c', glass: '#546c80', frame: '#e6cfae', nframe: '#2a221f', balcony: '#d9bfa0', nbal: '#241f22', mortar: 'rgba(70,30,20,.22)' },
-  slab:     { w: '#d8d2c4', nw: '#1f232a', corn: '#eef1f2', ncor: '#3a4552', glass: '#607e94', frame: '#c7cdd0', nframe: '#262c33', balcony: '#c3ccd2', nbal: '#20262d', mortar: 'rgba(120,120,110,.14)' },
+  slab:     { w: '#d4c8b2', nw: '#1f232a', corn: '#eef1f2', ncor: '#3a4552', glass: '#607e94', frame: '#c7cdd0', nframe: '#262c33', balcony: '#c3ccd2', nbal: '#20262d', mortar: 'rgba(120,120,110,.14)' },
   office:   { w: '#d8cdb2', nw: '#20232a', corn: '#efe7d2', ncor: '#3b4451', glass: '#526d82', frame: '#eee3c8', nframe: '#282b31', balcony: '#cfc6ad', nbal: '#232830', mortar: 'rgba(120,105,80,.16)' },
-  glass:    { w: '#3f5a72', nw: '#0c1219', corn: '#9fb6c8', ncor: '#22303e', glass: '#41607c', frame: '#2e455c', nframe: '#161d26', balcony: '#8ba1b3', nbal: '#1a212b', mortar: 'rgba(0,0,0,0)' },
+  glass:    { w: '#5a6470', nw: '#0c1219', corn: '#aeb6bd', ncor: '#22303e', glass: '#41607c', frame: '#9aa6b0', nframe: '#161d26', balcony: '#8ba1b3', nbal: '#1a212b', mortar: 'rgba(0,0,0,0)' },
   shop:     { w: '#c8b48c', nw: '#221c17', corn: '#f3e9d4', ncor: '#3b4350', glass: '#58748a', frame: '#f0e2c4', nframe: '#2b2622', balcony: '#d9c39c', nbal: '#242129', mortar: 'rgba(110,88,55,.18)' },
 };
 const FACADE_KEYS = ['brick', 'brickred', 'slab', 'office', 'glass', 'shop'];
 
-/** 画一个窗单元（4 开间 x 4 层里的一格）。 */
-function drawBay(ctx, key, night, x, y, P) {
+/**
+ * 6 张可平铺立面贴图（TEX=512 / CELL=128，4 开间 x 4 层），昼/夜两版共用同一 canvas 重绘。
+ * 针对「纯蓝玻璃盒子 / 重复 / 像积木」的改进：
+ *  - 墙体按材质分化：黄砖/红砖错缝砖块 + 逐块色差、真石漆颗粒 + 水平分格缝、
+ *    石材/铝板分格 + 壁柱高光、商厦腰线；不再是几条横线或一片纯蓝。
+ *  - 每个窗格用确定性 hash 决定玻璃反射档次 / 斜向高光 / 窗帘百叶 / 空调外机 /
+ *    阳台晾晒物，4x4 格各不相同，贴图 repeat 到高层也不显死板。
+ *  - 玻璃幕墙有天空渐变 + 云带反光 + 局部铝板实墙带 + 浅色铝合金龙骨，不是纯蓝网格。
+ *  - 底层商铺/入口与屋顶设备走几何（groundFloorParts / roofParts），贴图补一条深色勒脚带。
+ */
+
+/** 墙体材质底纹（按 FAC key 分化，画在一个 CELL 单元里）。 */
+function drawWall(ctx, key, night, x, y, P) {
   const C = CELL;
-  // 砖缝：横向细线，寒地砖混墙的层次感
-  if (P.mortar !== 'rgba(0,0,0,0)') {
-    ctx.strokeStyle = night ? 'rgba(0,0,0,.20)' : P.mortar;
+  if (key === 'brick' || key === 'brickred') {
+    // 清水砖墙：砖块错缝（隔行错半砖）+ 逐块颜色微扰 + 灰缝
+    const bh = 16, bw = 34;
+    const tint = key === 'brickred' ? '120,50,35' : '150,120,80';
+    for (let r = 0; r < C / bh; r += 1) {
+      const yy = y + r * bh;
+      const off = (r % 2) ? bw / 2 : 0;
+      for (let c = -1; c < C / bw + 1; c += 1) {
+        const xx = x + c * bw + off;
+        const v = (((c + 11) * 31 + r * 17) % 7) / 7;
+        ctx.fillStyle = night
+          ? `rgba(0,0,0,${(0.05 + v * 0.07).toFixed(3)})`
+          : `rgba(${tint},${(0.05 + v * 0.08).toFixed(3)})`;
+        ctx.fillRect(xx + 1, yy + 1, bw - 2, bh - 2);
+      }
+    }
+    ctx.strokeStyle = night ? 'rgba(0,0,0,.24)' : P.mortar;
+    ctx.lineWidth = 1;
+    for (let r = 0; r <= C / bh; r += 1) {
+      ctx.beginPath(); ctx.moveTo(x, y + r * bh); ctx.lineTo(x + C, y + r * bh); ctx.stroke();
+    }
+  } else if (key === 'slab') {
+    // 真石漆/铝板：细颗粒噪点 + 水平分格缝（新区高层「公建化」立面）
+    for (let i = 0; i < 80; i += 1) {
+      const px = x + litAt(i, 3, key) * C;
+      const py = y + litAt(5, i, key + 'g') * C;
+      ctx.fillStyle = night ? 'rgba(255,255,255,.02)' : 'rgba(60,58,52,.05)';
+      ctx.fillRect(px, py, 2, 2);
+    }
+    ctx.strokeStyle = night ? 'rgba(0,0,0,.20)' : 'rgba(90,90,90,.13)';
     ctx.lineWidth = 1;
     for (let t = 1; t < 4; t += 1) {
-      ctx.beginPath();
-      ctx.moveTo(x, y + 8 + t * 16);
-      ctx.lineTo(x + C, y + 8 + t * 16);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y + (t * C) / 4); ctx.lineTo(x + C, y + (t * C) / 4); ctx.stroke();
+    }
+  } else if (key === 'office') {
+    // 石材/铝板：大块板缝 + 中缝 + 浅壁柱高光
+    ctx.strokeStyle = night ? 'rgba(0,0,0,.22)' : 'rgba(120,105,80,.24)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 5, y + 5, C - 10, C - 10);
+    ctx.beginPath(); ctx.moveTo(x + C / 2, y); ctx.lineTo(x + C / 2, y + C); ctx.stroke();
+    ctx.fillStyle = night ? 'rgba(255,255,255,.02)' : 'rgba(255,250,235,.18)';
+    ctx.fillRect(x + 2, y, 4, C);
+  } else if (key === 'shop') {
+    // 商厦：石材腰线 + 浅壁柱
+    ctx.fillStyle = night ? 'rgba(255,255,255,.03)' : 'rgba(255,250,235,.22)';
+    ctx.fillRect(x, y + C - 12, C, 5);
+    ctx.fillRect(x + 2, y, 4, C);
+  }
+  // glass 幕墙底纹由 drawCurtainWall 自己负责
+}
+
+/** 白天窗玻璃：按 hash 给「冷天空反射 / 暖玻璃 / 暗玻璃」三档 + 斜向高光，拒绝纯色。 */
+function windowGlass(night, isLit, h) {
+  if (night) return { base: isLit ? (h < 0.16 ? '#fff2cf' : '#ffd79a') : '#0c1219', hi: '', lo: '', reflect: false };
+  if (h < 0.34) return { base: '#5b7a96', hi: '#b6d2e6', lo: '#2f4d68', reflect: true };
+  if (h < 0.68) return { base: '#4a6a86', hi: '#90b3cf', lo: '#2a4258', reflect: true };
+  return { base: '#3c556e', hi: '#7d9cba', lo: '#20364b', reflect: true };
+}
+
+/** 玻璃幕墙单元：天空渐变 + 云带反光 + 局部铝板实墙带 + 浅色铝合金龙骨 + 开启扇。 */
+function drawCurtainWall(ctx, night, x, y, P, L, h2, h3, isLit) {
+  const C = CELL;
+  const px = x + 4, py = y + 14, pw = C - 8, ph = C - 20;
+  if (night) {
+    ctx.fillStyle = isLit ? (L < 0.16 ? '#ffe6b8' : '#ffd191') : '#0a1017';
+    ctx.fillRect(px, py, pw, ph);
+  } else {
+    const g = ctx.createLinearGradient(px, py, px + pw * 0.35, py + ph);
+    g.addColorStop(0, L < 0.4 ? '#a4c3dc' : '#8cafc9');
+    g.addColorStop(0.45, L < 0.5 ? '#5b7e9c' : '#4a6c8a');
+    g.addColorStop(1, '#243d55');
+    ctx.fillStyle = g;
+    ctx.fillRect(px, py, pw, ph);
+    // 斜向云带 / 相邻楼倒影
+    ctx.fillStyle = `rgba(255,255,255,${(0.05 + h2 * 0.12).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.moveTo(px, py + ph * (0.10 + h3 * 0.22));
+    ctx.lineTo(px + pw, py + ph * (h3 * 0.22));
+    ctx.lineTo(px + pw, py + ph * (0.16 + h3 * 0.22));
+    ctx.lineTo(px, py + ph * (0.26 + h3 * 0.22));
+    ctx.closePath(); ctx.fill();
+    // 部分层间做铝板实墙带（香槟/深咖），破除「整片纯蓝」
+    if (h2 > 0.6) {
+      ctx.fillStyle = L > 0.5 ? '#7a6a58' : '#8a8577';
+      ctx.fillRect(px, py + ph * 0.6, pw, ph * 0.16);
+      ctx.fillStyle = 'rgba(255,255,255,.10)';
+      ctx.fillRect(px, py + ph * 0.6, pw, 2);
     }
   }
-  const L = litAt(Math.floor(x / C), Math.floor(y / C), key);
+  // 铝合金龙骨（浅色，替代旧版深蓝竖条）
+  ctx.fillStyle = night ? '#161d26' : P.frame;
+  ctx.fillRect(x, y + 10, 6, C - 10);
+  ctx.fillRect(x + C - 6, y + 10, 6, C - 10);
+  ctx.fillRect(x, y + 10, C, 6);
+  ctx.fillRect(x, y + C - 5, C, 5);
+  if (h3 > 0.45) ctx.fillRect(x + C / 2 - 1.5, y + 16, 3, C - 26); // 中竖梃
+  if (h2 > 0.78) { // 开启扇
+    ctx.fillStyle = night ? '#05080c' : 'rgba(20,40,60,.55)';
+    ctx.fillRect(px + pw * 0.62, py + ph * 0.3, pw * 0.22, ph * 0.3);
+  }
+}
+
+/** 画一个窗单元（4 开间 x 4 层里的一格，CELL=128）。 */
+function drawBay(ctx, key, night, x, y, P) {
+  const C = CELL;
+  const bx = Math.floor(x / C), by = Math.floor(y / C);
+  const L = litAt(bx, by, key);
+  const h2 = litAt(bx + 7, by - 3, key + 'b');
+  const h3 = litAt(bx - 5, by + 11, key + 'c');
   const isLit = night && L < 0.46;
-  const glass = night ? (isLit ? (L < 0.16 ? '#fff2cf' : '#ffd79a') : '#0c1219') : P.glass;
 
-  // 玻璃幕墙：整格玻璃 + 竖向龙骨 + 层间横梁（写字楼/产业园/现代商场）
-  if (key === 'glass') {
-    ctx.fillStyle = night ? (isLit ? '#ffdca0' : '#0a1017') : P.w;
-    ctx.fillRect(x + 2, y + 11, C - 4, C - 13);
-    if (!night) {
-      const g = ctx.createLinearGradient(0, y + 11, 0, y + C);
-      g.addColorStop(0, '#8fb6d4');
-      g.addColorStop(1, '#3c5f7e');
-      ctx.fillStyle = g;
-      ctx.fillRect(x + 2, y + 11, C - 4, C - 13);
-    }
-    ctx.fillStyle = night ? 'rgba(255,255,255,.04)' : 'rgba(255,255,255,.16)';
-    ctx.fillRect(x + 7, y + 13, 8, C - 17);
-    ctx.fillStyle = night ? '#161d26' : P.frame;
-    ctx.fillRect(x, y + 8, 3, C - 8);   // 竖龙骨
-    ctx.fillRect(x, y + 8, C, 3);       // 层间横梁
-    return;
-  }
+  drawWall(ctx, key, night, x, y, P);
+  if (key === 'glass') { drawCurtainWall(ctx, night, x, y, P, L, h2, h3, isLit); return; }
 
-  // 窗洞尺寸：办公是窄高竖窗，商厦是大橱窗，住宅是普通方窗
+  // 窗洞尺寸：办公窄高竖窗 / 商厦大橱窗 / 住宅普通方窗（CELL=128 下放大）
   let ww; let wh;
-  if (key === 'office') { ww = 20; wh = 40; }
-  else if (key === 'shop') { ww = 44; wh = 36; }
-  else { ww = 30; wh = 34; }
+  if (key === 'office') { ww = 42; wh = 80; }
+  else if (key === 'shop') { ww = 90; wh = 72; }
+  else { ww = 62; wh = 66; }
   const wx = x + (C - ww) / 2;
-  const wy = y + 16;
+  const wy = y + 34;
 
-  // 厚窗洞外框（寒地厚墙、小窗，显得墙很实在）
+  // 厚窗洞外框 + 白色窗楣线脚（寒地厚墙 / 俄式线脚）
   ctx.fillStyle = night ? P.nframe : P.frame;
-  ctx.fillRect(wx - 3, wy - 3, ww + 6, wh + 6);
-  ctx.fillStyle = glass;
+  ctx.fillRect(wx - 6, wy - 6, ww + 12, wh + 12);
+  const glass = windowGlass(night, isLit, L);
+  ctx.fillStyle = glass.base;
   ctx.fillRect(wx, wy, ww, wh);
-  if (!night) {
-    ctx.fillStyle = 'rgba(255,255,255,.16)';
-    ctx.fillRect(wx + 2, wy + 2, ww * 0.34, wh - 4);
+  if (glass.reflect) {
+    const g = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
+    g.addColorStop(0, glass.hi);
+    g.addColorStop(0.55, glass.base);
+    g.addColorStop(1, glass.lo);
+    ctx.fillStyle = g;
+    ctx.fillRect(wx, wy, ww, wh);
+    // 一道斜向高光
+    ctx.fillStyle = `rgba(255,255,255,${(0.10 + h2 * 0.14).toFixed(3)})`;
+    ctx.beginPath();
+    ctx.moveTo(wx + ww * (0.12 + h3 * 0.2), wy);
+    ctx.lineTo(wx + ww * (0.34 + h3 * 0.2), wy);
+    ctx.lineTo(wx + ww * (0.12 + h3 * 0.2), wy + wh);
+    ctx.lineTo(wx - ww * 0.1 + ww * (0.12 + h3 * 0.2), wy + wh);
+    ctx.closePath(); ctx.fill();
   }
-  // 双层防冻窗：竖中挺 + 内圈第二层窗框 + 窗台
+  // 窗帘 / 百叶（确定性，部分窗）：窗内不是纯色块
+  if (h2 > 0.62 && !isLit) {
+    ctx.fillStyle = night ? 'rgba(0,0,0,.35)' : 'rgba(235,225,205,.55)';
+    const blindH = wh * (0.3 + h3 * 0.32);
+    ctx.fillRect(wx + 2, wy + 2, ww - 4, blindH);
+    ctx.strokeStyle = night ? 'rgba(0,0,0,.28)' : 'rgba(120,110,95,.30)';
+    ctx.lineWidth = 1;
+    for (let t = 4; t < blindH; t += 6) {
+      ctx.beginPath(); ctx.moveTo(wx + 2, wy + 2 + t); ctx.lineTo(wx + ww - 2, wy + 2 + t); ctx.stroke();
+    }
+  }
+  // 双层防冻窗：竖中挺 + 内圈第二层框 + 窗台
   ctx.fillStyle = night ? P.nframe : P.frame;
-  ctx.fillRect(wx + ww / 2 - 1, wy, 2, wh);
+  ctx.fillRect(wx + ww / 2 - 1.5, wy, 3, wh);
   ctx.strokeStyle = night ? 'rgba(0,0,0,.55)' : 'rgba(120,100,70,.55)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(wx + 3, wy + 3, ww - 6, wh - 6);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(wx + 5, wy + 5, ww - 10, wh - 10);
   ctx.fillStyle = night ? P.nframe : P.frame;
-  ctx.fillRect(wx - 4, wy + wh + 2, ww + 8, 4);
+  ctx.fillRect(wx - 8, wy + wh + 3, ww + 16, 7);
+  // 窗楣线脚
+  ctx.fillStyle = night ? 'rgba(255,255,255,.06)' : P.corn;
+  ctx.fillRect(wx - 8, wy - 13, ww + 16, 5);
 
-  // 阳台：外凸栏板 + 竖向栏杆（住宅的标志）
+  // 阳台（住宅）：外凸栏板 + 竖栏杆 + 晾晒物色块
   if (key === 'brick' || key === 'brickred' || key === 'slab') {
-    const by = wy + wh + 7;
+    const by = wy + wh + 12;
     ctx.fillStyle = night ? P.nbal : P.balcony;
-    ctx.fillRect(wx - 5, by, ww + 10, 8);
+    ctx.fillRect(wx - 10, by, ww + 20, 14);
     ctx.fillStyle = night ? 'rgba(0,0,0,.45)' : 'rgba(90,75,50,.38)';
-    for (let i = 0; i < 5; i += 1) ctx.fillRect(wx - 3 + i * ((ww + 6) / 5), by + 2, 2, 6);
+    for (let i = 0; i < 6; i += 1) ctx.fillRect(wx - 6 + i * ((ww + 12) / 6), by + 3, 3, 11);
+    if (h3 > 0.55) {
+      ctx.fillStyle = night ? 'rgba(255,255,255,.08)' : ['#a87a52', '#7d8a92', '#b7a98c'][Math.floor(h3 * 3) % 3];
+      ctx.fillRect(wx + 4, by - 9, 15, 10);
+    }
   }
-  // 商厦拱窗：窗顶一个半圆，巴洛克/折衷味
+  // 空调外机：部分窗侧，带格栅线 + 支架阴影（用户点名「无空调外机」）
+  if (h3 > 0.5 && key !== 'shop') {
+    const ax = h2 > 0.5 ? wx - 24 : wx + ww + 6;
+    const ay = wy + wh - 28;
+    ctx.fillStyle = night ? '#1a1d22' : '#c9cdd0';
+    ctx.fillRect(ax, ay, 20, 24);
+    ctx.fillStyle = night ? 'rgba(0,0,0,.5)' : 'rgba(70,70,70,.35)';
+    ctx.fillRect(ax - 2, ay + 22, 24, 4);
+    ctx.strokeStyle = night ? 'rgba(255,255,255,.08)' : 'rgba(80,80,80,.5)';
+    ctx.lineWidth = 1;
+    for (let t = 1; t < 5; t += 1) {
+      ctx.beginPath(); ctx.moveTo(ax + 2, ay + 4 + t * 4); ctx.lineTo(ax + 18, ay + 4 + t * 4); ctx.stroke();
+    }
+  }
+  // 商厦拱窗（巴洛克 / 折衷）+ 中华巴洛克式拱心石 / 砖雕点饰
   if (key === 'shop') {
     ctx.fillStyle = night ? (isLit ? '#ffdca0' : '#0c1219') : P.glass;
-    ctx.beginPath();
-    ctx.arc(wx + ww / 2, wy, ww / 2, Math.PI, 0);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(wx + ww / 2, wy, ww / 2, Math.PI, 0); ctx.fill();
     ctx.strokeStyle = night ? P.nframe : P.frame;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(wx + ww / 2, wy, ww / 2, Math.PI, 0);
-    ctx.stroke();
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(wx + ww / 2, wy, ww / 2, Math.PI, 0); ctx.stroke();
+    ctx.fillStyle = night ? 'rgba(255,255,255,.06)' : P.corn;
+    ctx.fillRect(wx + ww / 2 - 3, wy - ww / 2 - 4, 6, 8);
   }
 }
 
@@ -277,21 +450,22 @@ function paintFacade(ctx, key, night) {
   ctx.fillRect(0, 0, TEX, TEX);
   for (let r = 0; r < 4; r += 1) {
     const y0 = r * CELL;
-    // 每层顶部一条层间线脚带；第 0 行画成纯白雪带，专门给坡屋顶/平顶采样当「雪顶」
-    const line = r === 0
-      ? (night ? '#c9d6e1' : '#f3f8fb')
-      : (night ? P.ncor : P.corn);
-    ctx.fillStyle = line;
-    ctx.fillRect(0, y0, TEX, 8);
-    ctx.fillStyle = night ? 'rgba(0,0,0,.35)' : 'rgba(90,78,55,.20)';
-    ctx.fillRect(0, y0 + 8, TEX, 3);
     for (let c = 0; c < 4; c += 1) drawBay(ctx, key, night, c * CELL, y0, P);
+    // 层间线脚带盖在窗单元顶部；第 0 行纯雪白带（SNOW_BAND 高）供 solidBox 采「雪顶」
+    const band = r === 0 ? SNOW_BAND : 11;
+    ctx.fillStyle = r === 0 ? (night ? '#c9d6e1' : '#f3f8fb') : (night ? P.ncor : P.corn);
+    ctx.fillRect(0, y0, TEX, band);
+    ctx.fillStyle = night ? 'rgba(0,0,0,.40)' : 'rgba(90,78,55,.24)';
+    ctx.fillRect(0, y0 + band, TEX, 4);
   }
-  // 办公/商厦的竖向壁柱：贯穿层高的浅色竖线，俄式线脚感
+  // 办公/商厦竖向壁柱：贯穿层高的浅色竖线，俄式线脚感
   if (key === 'office' || key === 'shop') {
-    ctx.fillStyle = night ? 'rgba(255,255,255,.05)' : 'rgba(255,250,235,.45)';
-    for (let c = 0; c <= 4; c += 1) ctx.fillRect(c * CELL - 2, 0, 4, TEX);
+    ctx.fillStyle = night ? 'rgba(255,255,255,.05)' : 'rgba(255,250,235,.42)';
+    for (let c = 0; c <= 4; c += 1) ctx.fillRect(c * CELL - 3, 0, 6, TEX);
   }
+  // 底层深色勒脚带（配合几何 groundFloorParts 的入口/雨棚/店招）
+  ctx.fillStyle = night ? 'rgba(0,0,0,.35)' : 'rgba(70,60,45,.30)';
+  ctx.fillRect(0, TEX - 7, TEX, 7);
 }
 
 // --------------------------------------------------------------- 立面几何片段 ---
@@ -380,6 +554,63 @@ function gableRoof(w, d, y0, rise, overhang = 0.7, ox = 0, oz = 0) {
 function flatCap(w, d, y0, h = 0.9, over = 0.6) {
   return solidBox(w + over * 2, h, d + over * 2, 0, y0 + h / 2, 0);
 }
+
+/**
+ * 底层商铺 / 入口带（示意级工程做法）。用浅色混凝土构件（solidBox 采雪白点）
+ * 在主体底部加：勒脚、门套立柱、门楣、挑檐雨棚、店招横匾、橱窗竖梃，
+ * 破「一张立面贴图从底铺到顶」的积木感，对应「一层商铺、上层住宅/办公」。[R1][R6]
+ */
+function groundFloorParts(w, d, rnd) {
+  const P = [];
+  const zf = d / 2;
+  P.push(solidBox(w + 0.7, 0.6, d + 0.7, 0, 0.3, 0));                       // 厚勒脚 / 基座
+  const dw = Math.min(3.6, w * 0.26);
+  for (const sx of [-1, 1]) P.push(solidBox(0.28, 2.7, 0.28, sx * dw / 2, 1.65, zf + 0.2)); // 门套立柱
+  P.push(solidBox(dw + 0.6, 0.3, 0.34, 0, 3.05, zf + 0.2));                 // 门楣
+  P.push(solidBox(dw + 1.8, 0.18, 1.6, 0, 3.3, zf + 0.9));                  // 入口挑檐雨棚
+  P.push(solidBox(w * 0.46, 0.75, 0.16, (rnd() - 0.5) * w * 0.3, 3.95, zf + 0.12)); // 店招横匾
+  const n = clamp(Math.floor(w / 6), 2, 4); // v2.3 预算精简：竖梃上限 5→4，单栋省 12 三角
+  for (let i = 0; i < n; i += 1) {
+    const x = -w / 2 + ((i + 0.5) * w) / n;
+    P.push(solidBox(0.22, 2.6, 0.22, x, 1.7, zf + 0.16));                     // 橱窗竖梃
+  }
+  return P;
+}
+
+/**
+ * 屋顶设备组（示意级工程做法，用户点名「无屋顶设备」）。平顶加机房/楼梯间、
+ * 水箱、冷却塔、通信/避雷天线、屋面管道；坡顶加烟囱与屋脊通气。
+ * 全部并进同一合并几何，不增加 draw call。参考新区高层「塔冠 / 出屋面机房」[R13]。
+ * v2.3 预算精简（全队三角面余量告急）：圆柱分段 10/8→8/6、竖梃上限 5→4，
+ * 只降分段不删部件、不改视觉设计，单栋约省 60 三角；本轮未新增任何几何面数。
+ */
+function roofParts(w, d, h, rise, rnd) {
+  const P = [];
+  if (rise > 0) {
+    P.push(solidBox(0.8, rise * 0.9 + 1.0, 0.8, (rnd() - 0.5) * w * 0.5, h + rise * 0.5 + 0.5, -d * 0.18));
+    P.push(solidBox(0.7, rise * 0.7 + 0.8, 0.7, (rnd() - 0.5) * w * 0.5, h + rise * 0.45 + 0.4, d * 0.2));
+    P.push(solidCyl(0.35, 0.35, 0.9, 6, (rnd() - 0.5) * w * 0.3, h + rise + 0.45, 0));
+    return P;
+  }
+  const top = h + 0.9; // 约平顶檐口上表面
+  const rw = w * 0.24, rd = d * 0.3;
+  const rx = (rnd() - 0.5) * w * 0.4, rz = (rnd() - 0.5) * d * 0.3;
+  P.push(solidBox(rw, 2.8, rd, rx, top + 1.4, rz));                          // 电梯机房 / 楼梯间
+  P.push(solidBox(rw * 0.55, 0.4, rd * 0.55, rx, top + 3.0, rz));            // 机房顶盖
+  const tx = (rnd() - 0.5) * w * 0.5, tz = (rnd() - 0.5) * d * 0.4;
+  P.push(solidCyl(1.0, 1.0, 1.6, 8, tx, top + 1.7, tz));                     // 圆形水箱
+  P.push(solidCyl(1.1, 1.1, 0.2, 6, tx, top + 0.9, tz));                     // 水箱底座
+  for (let i = 0; i < 2; i += 1) {
+    const cx = (rnd() - 0.5) * w * 0.5, cz = (rnd() - 0.5) * d * 0.4;
+    P.push(solidCyl(0.55, 0.55, 0.9, 6, cx, top + 0.45, cz));                 // 冷却塔 / 排风机
+  }
+  const ax = (rnd() - 0.5) * w * 0.3, az = (rnd() - 0.5) * d * 0.3;
+  P.push(solidBox(0.12, 4.4, 0.12, ax, top + 2.2, az));                      // 通信 / 避雷天线
+  P.push(solidBox(1.2, 0.1, 0.1, ax, top + 4.2, az));                        // 天线横杆
+  P.push(solidBox(w * 0.3, 0.18, 0.5, (rnd() - 0.5) * w * 0.3, top + 0.1, (rnd() - 0.5) * d * 0.3)); // 屋面管 / 太阳能板
+  return P;
+}
+
 /** 洋葱头/帐篷顶轮廓（从底部收颈，到鼓肚，再收到尖）。 */
 const DOME_PROFILE = (r, hh) => [
   [0.55 * r, 0.00 * hh], [0.92 * r, 0.10 * hh], [1.00 * r, 0.30 * hh],
@@ -401,16 +632,19 @@ const TYPES = {
   'res-haxi-slab':        { category: 'residential', facade: 'slab', form: 'slab-tall', w: 26, d: 13, h: 56 },
   'res-dongbei-brick':    { category: 'residential', facade: 'brickred', form: 'lowrise-gable', w: 22, d: 12, h: 17, rise: 3.4 },
   'res-daoli-russian':    { category: 'residential', facade: 'brick', form: 'lowrise-gable', w: 20, d: 14, h: 15, rise: 3.8 },
+  'res-haxi-alu-tower':   { category: 'residential', facade: 'slab', form: 'slab-tall', w: 24, d: 12, h: 88 },
   // ---- 办公 office ----
   'off-soviet-symmetric': { category: 'office', facade: 'office', form: 'office-symmetric', w: 38, d: 18, h: 30, rise: 3 },
   'off-glass-tower':      { category: 'office', facade: 'glass', form: 'office-tower', w: 20, d: 20, h: 72 },
   'off-railway-eclectic': { category: 'office', facade: 'office', form: 'office-eclectic', w: 40, d: 20, h: 26, rise: 3.2 },
   'off-campus-rnd':       { category: 'office', facade: 'glass', form: 'office-campus', w: 34, d: 16, h: 20 },
+  'off-alu-curtain':      { category: 'office', facade: 'glass', form: 'office-tower', w: 24, d: 18, h: 64 },
   // ---- 商业 commercial ----
   'com-central-euro':     { category: 'commercial', facade: 'shop', form: 'shop-euro', w: 24, d: 16, h: 13, rise: 3 },
   'com-qiulin-store':     { category: 'commercial', facade: 'brickred', form: 'shop-department', w: 28, d: 20, h: 20, rise: 3 },
   'com-modern-mall':      { category: 'commercial', facade: 'glass', form: 'shop-mall', w: 44, d: 30, h: 22 },
   'com-ice-lodge':        { category: 'commercial', facade: 'shop', form: 'shop-lodge', w: 12, d: 10, h: 7, rise: 5 },
+  'com-art-nouveau':      { category: 'commercial', facade: 'office', form: 'shop-euro', w: 28, d: 18, h: 16, rise: 3.4 },
   // ---- 地标 landmark（单独 Group，见 LANDMARK_BUILDERS）----
   'lm-st-sophia':       { category: 'landmark', builder: 'sophia' },
   'lm-flood-monument':  { category: 'landmark', builder: 'flood' },
@@ -447,14 +681,17 @@ export const BUILDING_CATALOG = [
   { id: 'res-haxi-slab', category: 'residential', name: '哈西/群力高层板式住宅', style: '新区高层板楼', note: '细高板式体量、平屋顶女儿墙、规整窗带、竖向阳台列与屋顶机房。', sources: ['R3'] },
   { id: 'res-dongbei-brick', category: 'residential', name: '东北多层砖混坡顶住宅', style: '寒地砖混', note: '砖红墙、双层防冻窗、外凸阳台、明显双坡雪顶与烟囱。', sources: ['R4'] },
   { id: 'res-daoli-russian', category: 'residential', name: '道里俄式多层住宅', style: '俄式砖木', note: '暖黄砖墙、陡坡雪顶、白色线脚与厚窗洞，体量比苏式家属楼更小。', sources: ['R2', 'R4'] },
+  { id: 'res-haxi-alu-tower', category: 'residential', name: '群力/哈西铝板超高层', style: '新区公建化高层', note: '近 100 m 细高板楼、真石漆+铝板分格、落地窗带、竖向阳台列、屋顶塔冠与出屋面机房/水箱/天线。', sources: ['R3', 'R13'] },
   { id: 'off-soviet-symmetric', category: 'office', name: '苏联式对称办公楼', style: '斯大林式对称', note: '宽体两翼+中轴高塔+塔尖，前立面柱廊门廊，中轴对称一眼可辨。', sources: ['R5'] },
   { id: 'off-glass-tower', category: 'office', name: '玻璃幕墙写字楼', style: '现代高层', note: '细高玻璃塔、顶部收分、平顶檐口与屋面天线。', sources: ['R5'] },
   { id: 'off-railway-eclectic', category: 'office', name: '铁路局折衷主义办公楼', style: '折衷主义', note: '宽体坡顶+中部穹顶塔+门廊柱，米黄石墙与竖向壁柱。', sources: ['R5'] },
   { id: 'off-campus-rnd', category: 'office', name: '产业园研发楼', style: '现代园区', note: '扁平多层板楼、玻璃中庭、平顶女儿墙，体量横向铺开。', sources: ['R5'] },
+  { id: 'off-alu-curtain', category: 'office', name: '铝板玻璃幕墙办公塔', style: '现代高层·铝板+幕墙', note: '收分玻璃塔、浅色铝合金龙骨、层间铝板实墙带、香槟/深咖色，平顶天线与屋面设备。', sources: ['R5', 'R13'] },
   { id: 'com-central-euro', category: 'commercial', name: '中央大街欧式商厦', style: '欧式折衷商厦', note: '两三层、坡顶、转角小穹顶塔、大拱橱窗与通长腰线。', sources: ['R6'] },
   { id: 'com-qiulin-store', category: 'commercial', name: '秋林公司老百货', style: '巴洛克老百货', note: '砖红墙、转角塔楼与尖顶、巴洛克线脚，示意老百货转角体量。', sources: ['R6'] },
   { id: 'com-modern-mall', category: 'commercial', name: '现代购物中心', style: '现代商业综合体', note: '大体量玻璃盒子、平顶、入口中庭雨棚与屋顶招牌块。', sources: ['R6'] },
   { id: 'com-ice-lodge', category: 'commercial', name: '冰雪旅游街坡顶木屋', style: '冰雪木屋', note: '小体量、陡坡雪顶、暖木色墙与门廊，示意旅游商业街小店。', sources: ['R6', 'R12'] },
+  { id: 'com-art-nouveau', category: 'commercial', name: '中央大街新艺术运动商厦', style: '新艺术运动·曲线窗楣', note: '石材/浅色墙面、曲线拱券窗楣、转角穹顶小塔、大橱窗与通长腰线，示意中央大街折衷商厦。', sources: ['R6', 'R15'] },
   { id: 'lm-st-sophia', category: 'landmark', name: '圣索菲亚教堂', style: '拜占庭式', note: '清水红砖墙+绿漆屋面，中央巨大洋葱头穹顶统率四翼帐篷顶尖塔（示意把四翼小顶也做成洋葱头以便辨认）+金十字。', sources: ['R7'] },
   { id: 'lm-flood-monument', category: 'landmark', name: '防洪纪念塔', style: '纪念性柱廊塔', note: '圆柱塔身+20根科林斯柱的35m半圆回廊+24人浮雕环带+顶部群雕，方形石砌塔基。', sources: ['R8'] },
   { id: 'lm-dragon-tower', category: 'landmark', name: '龙塔', style: '钢结构电视塔', note: '下宽上窄塔身、透空钢桁架、上部碟形塔楼与细天线。', sources: ['R9'] },
@@ -597,6 +834,10 @@ function buildTypeGeometry(id, dims, seed) {
     default:
       P.push(fbox(w, h, d, 0));
   }
+  // 统一给每类普通楼补「底层商铺/入口」与「屋顶设备」（示意级工程做法）。
+  // 缓存几何用 seed=0，InstancedMesh 内各实例共享 → 仍是 1 类 = 1 合并几何 = 1 draw call。
+  P.push(...groundFloorParts(w, d, rnd));
+  P.push(...roofParts(w, d, h, rise, rnd));
   void rnd;
   return finish(P);
 }
@@ -948,6 +1189,21 @@ export function createBuildingFactory() {
     else _c.set(tint); // hex / css 字符串
     return _c;
   }
+  /**
+   * 逐实例色调微扰：同类型 InstancedMesh 共几何 + 共贴图，只能靠 scale + 颜色破重复。
+   * 在原 tint 基础上按实例序号做确定性冷暖 / 明度小幅偏移，让相邻楼深浅不同、
+   * 微偏暖或偏冷，而不是「一水儿同色玻璃盒子」。
+   */
+  function tintFor(s, i) {
+    applyTint(s.tint);                                   // _c = 基色
+    const h = ((i * 2654435761) >>> 0) / 4294967296;
+    const warm = (h - 0.5) * 0.12;                      // ±0.06 冷暖
+    _c.r = clamp(_c.r * (1 + warm), 0, 1);
+    _c.g = clamp(_c.g * (1 + warm * 0.3), 0, 1);
+    _c.b = clamp(_c.b * (1 - warm), 0, 1);
+    _c.multiplyScalar(0.92 + h * 0.16);                 // 明度 0.92~1.08
+    return _c;
+  }
 
   function instanced(typeId, specs, opts = {}) {
     void opts;
@@ -982,7 +1238,7 @@ export function createBuildingFactory() {
       applyScale(_s, s.scale);
       _m.compose(_p, _q, _s);
       mesh.setMatrixAt(i, _m);
-      mesh.setColorAt(i, applyTint(s.tint));
+      mesh.setColorAt(i, tintFor(s, i));
     });
     mesh.count = list.length;
     mesh.instanceMatrix.needsUpdate = true;

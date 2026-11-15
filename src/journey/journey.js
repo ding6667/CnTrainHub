@@ -63,14 +63,19 @@ function boot() {
   scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffd2a1, 2.2);
   key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  Object.assign(key.shadow.camera, { left: -180, right: 180, top: 180, bottom: -180, near: 1, far: 620 });
-  key.shadow.bias = -0.0007;
-  key.shadow.normalBias = 0.04;
+  key.shadow.mapSize.set(1536, 1536);
+  // 16 辆长编全长 417 m，阴影相机必须罩住整列车，否则车尾没有投影。
+  Object.assign(key.shadow.camera, { left: -270, right: 270, top: 270, bottom: -270, near: 1, far: 760 });
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.025;
   key.target.position.set(0, 2, -40);
   scene.add(key, key.target);
   const rim = new THREE.DirectionalLight(0x74b6ff, 1.6);
   scene.add(rim, rim.target);
+  // 冷色补光：给车体侧面和站台背光面一点层次，避免所有面都是同一个亮度。
+  const fill = new THREE.DirectionalLight(0xbcd6ef, 0.42);
+  fill.position.set(-60, 34, 80);
+  scene.add(fill);
 
   /** 重烘阴影前先 dispose 旧 RT，否则每次 needsUpdate 都会泄漏一张纹理。 */
   function refreshShadows() {
@@ -91,6 +96,9 @@ function boot() {
     for (let i = 0; i < skyPos.count; i += 1) {
       const y = skyPos.getY(i) / 3000;
       const c = y > 0.08 ? cMid.clone().lerp(cTop, Math.min(1, (y - 0.08) / 0.7)) : cBot.clone().lerp(cMid, Math.min(1, (y + 0.5) / 0.58));
+      // 地平线附近加一层暖散射（真实大气的米氏散射），天空不再是一条硬渐变。
+      const horizon = Math.exp(-(((y - 0.015) / 0.13) ** 2));
+      c.lerp(new THREE.Color(t.env.glow), horizon * 0.3);
       colors.push(c.r, c.g, c.b);
     }
     skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -98,6 +106,54 @@ function boot() {
   const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
   sky.frustumCulled = false;
   scene.add(sky);
+
+  // 太阳光晕：程序化径向渐变 sprite，按主光方向摆到天空球内。
+  const sunOffset = new THREE.Vector3();
+  let sunSprite = null;
+  {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 256;
+    const g = cv.getContext('2d');
+    const grad = g.createRadialGradient(128, 128, 2, 128, 128, 128);
+    grad.addColorStop(0, 'rgba(255,250,232,0.95)');
+    grad.addColorStop(0.10, 'rgba(255,232,186,0.55)');
+    grad.addColorStop(0.32, 'rgba(255,206,146,0.14)');
+    grad.addColorStop(1, 'rgba(255,190,130,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, fog: false,
+    }));
+    sunSprite.scale.set(560, 560, 1);
+    scene.add(sunSprite);
+  }
+
+  // 列车接地软阴影：实时阴影贴图在软件栅格化下很淡，这张程序化软影让 200~417 m
+  // 的车体真正「压」在道床上，而不是浮在轨道上。长度随编组缩放。
+  const contactShadow = (() => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(0,0,0,0.45)');
+    grad.addColorStop(0.58, 'rgba(0,0,0,0.18)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(cv);
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(9, 460),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.8 }),
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(0, -0.6, 0);
+    mesh.renderOrder = 1;
+    return mesh;
+  })();
+  scene.add(contactShadow);
 
   // ---------------------------------------------------------------- state ---
   const S = {
@@ -174,6 +230,7 @@ function boot() {
 
   let train = buildTrain(trainConfig());
   scene.add(train.group);
+  contactShadow.scale.y = Math.max(0.4, train.total / 460);
 
   function currentSpec() {
     const cfg = trainConfig();
@@ -206,12 +263,46 @@ function boot() {
   const stationSys = runtime.registry.get('stations');
   camSys?.setTrainSpec?.(currentSpec());
 
+  /**
+   * 到发线横移量按该站**真实站台边缘**算：让列车中心停在「站台边缘 − 1.75 m」，
+   * 车侧与站台面只留 7 cm 缝隙（真实高站台就是这样）。旧版 stationLane 默认横移
+   * 6.5 m，而哈西最内侧站台边缘在 11.5 m，所以「进到发线」后车与站台仍差 5 m ——
+   * 这正是「站房和轨道不挨着」的残留根因。
+   */
+  function stationLaneFor(centerS, stationId) {
+    const bands = stationSys?.platformBandsFor?.(stationId) ?? [];
+    const edge = bands.length
+      ? Math.min(...bands.map(([a, b]) => Math.min(Math.abs(a), Math.abs(b))))
+      : 0;
+    const offset = edge > 3 ? edge - RAIL.platformEdge : 6.5;
+    return runtime.alignment.stationLane(centerS, 1, { offset });
+  }
+  function stationIdAt(meters) {
+    const n = (route.nodes || []).find((x) => Math.abs(x.km * 1000 - meters) < 2);
+    return n?.stationId ?? n?.name ?? null;
+  }
+
+  // 起点若在站内，默认就停在到发线：第一眼必须是「列车贴着站台」，
+  // 而不是停在正线上、站台在 11 m 外（用户抱怨的分离感）。
+  {
+    const L = HARBIN_PACK.stationLayouts ?? {};
+    const node = (route.nodes || []).find((n) => {
+      const len = L[n.stationId]?.platformLength ?? RAIL.platformLength;
+      return Math.abs(n.km * 1000 - runtime.state.s) <= len / 2;
+    });
+    if (node) {
+      runtime.setLane(stationLaneFor(node.km * 1000, node.stationId));
+      $('c-lane').value = 'station';
+    }
+  }
+
   function rebuildTrain() {
     scene.remove(train.group);
     train.dispose();
     const cfg = trainConfig();
     train = buildTrain(cfg);
     scene.add(train.group);
+    contactShadow.scale.y = Math.max(0.4, train.total / 460);
     train.setWireframe(S.wire);
     train.materials.glass.emissiveIntensity = S.theme === 'night' ? 0.07 : S.theme === 'dusk' ? 0.04 : 0.01;
     const spec = currentSpec();
@@ -244,6 +335,9 @@ function boot() {
     renderer.toneMappingExposure = theme.exposure;
     paintSky(theme);
     skyGeo.attributes.color.needsUpdate = true;
+    sunOffset.copy(key.position).normalize().multiplyScalar(1400);
+    sunSprite.material.opacity = id === 'night' ? 0.05 : id === 'dusk' ? 0.7 : 0.85;
+    sunSprite.material.color.setHex(id === 'night' ? 0x9fc4ea : 0xfff0d4);
     const old = envRT;
     envRT = makeEnvironment(renderer, theme);
     scene.environment = envRT.texture;
@@ -335,7 +429,7 @@ function boot() {
 
   const RANGES = [
     ['c-speed', 'o-speed', 'kmh', (v) => `${v.toFixed(0)} km/h`],
-    ['c-accel', 'o-accel', 'accel', (v) => `${v.toFixed(0)} m/s²`],
+    ['c-accel', 'o-accel', 'accel', (v) => `${v.toFixed(1)} m/s²`],
     ['c-fov', 'o-fov', 'fov', (v) => `${v.toFixed(0)}°`],
     ['c-ahead', 'o-ahead', 'ahead', (v) => `${v.toFixed(0)} 块`],
     ['c-density', 'o-density', 'density', (v) => `${v.toFixed(0)}%`],
@@ -348,7 +442,7 @@ function boot() {
       const v = Number(el.value);
       S[keyName] = keyName === 'density' ? v / 100 : v;
       $(outId).textContent = fmt(v);
-      if (keyName === 'kmh') runtime.state.targetKmh = v;
+      if (keyName === 'kmh') runtime.setTargetKmh(v);
       else if (keyName === 'accel') runtime.state.accel = v;
       else if (keyName === 'fov') {
         cam.fov = v; cam.updateProjectionMatrix(); camSys?.setFov?.(v);
@@ -356,6 +450,63 @@ function boot() {
       else { runtime.state.density = S.density; chunkSys?.clear?.(); }
     });
   }
+  // ------------------------------------------------ 驾驶台：控制权交给玩家 ----
+  // 默认纯手动：牵引 / 制动 / 开关门 / 换向全部由玩家操作，系统只做 ATP 限速
+  // 监督与「两端车门是否都在停车区间内」的安全门控，绝不替玩家停车或发车。
+  const throttleEl = $('c-throttle');
+  const brakeEl = $('c-brake');
+  const atoEl = $('c-ato');
+
+  function syncDriveUi() {
+    const st = runtime.state;
+    const t = Math.round((st.running ? st.throttle : 0) * 100);
+    const b = Math.round((st.emergency ? 1 : st.brake) * 100);
+    if (document.activeElement !== throttleEl) throttleEl.value = String(t);
+    if (document.activeElement !== brakeEl) brakeEl.value = String(b);
+    $('o-throttle').textContent = `${t}%`;
+    $('o-brake').textContent = `${b}%`;
+    $('drive-mode').textContent = st.autoDrive ? 'ATO 自动' : '手动驾驶';
+    $('drive-mode').classList.toggle('is-ato', Boolean(st.autoDrive));
+    atoEl.checked = Boolean(st.autoDrive);
+  }
+
+  /** 开门必须同时满足：停稳 + 全列两端车门都在停车区间内。 */
+  function requestDoors(open) {
+    const st = runtime.state;
+    if (open) {
+      if (!st.stopped) { notice('请先停稳列车再开门'); return; }
+      if (!st.doorsCanOpen) { notice('禁止开门 · 两端车门未全部落在停车区间内'); return; }
+    }
+    runtime.setDoorRequest(open);
+    $('c-doors').value = open ? 'open' : 'close';
+    notice(open ? '请求开门 · 停稳且全列在区间内' : '车门关闭');
+  }
+
+  throttleEl.addEventListener('input', () => {
+    runtime.setThrottle(Number(throttleEl.value) / 100);
+    if (Number(throttleEl.value) > 0) brakeEl.value = '0';
+    syncDriveUi();
+  });
+  brakeEl.addEventListener('input', () => {
+    runtime.setBrake(Number(brakeEl.value) / 100);
+    if (Number(brakeEl.value) > 0) throttleEl.value = '0';
+    syncDriveUi();
+  });
+  atoEl.addEventListener('change', () => {
+    runtime.setAutoDrive(atoEl.checked);
+    notice(atoEl.checked ? 'ATO 已接管 · 自动对标停车与乘降' : '已切回手动驾驶 · 请自行牵引 / 制动 / 开关门');
+    syncDriveUi();
+  });
+  $('a-emergency').addEventListener('click', () => {
+    const on = !runtime.state.emergency;
+    runtime.setEmergency(on);
+    notice(on ? '紧急制动 · 1.6 m/s²' : '紧急制动缓解');
+    syncDriveUi();
+  });
+  $('a-doors-open').addEventListener('click', () => requestDoors(true));
+  $('a-doors-close').addEventListener('click', () => requestDoors(false));
+  syncDriveUi();
+
   const CHECKS = [
     ['c-follow', 'follow'], ['c-buildings', 'buildings'], ['c-stations', 'stations'],
     ['c-rural', 'rural'], ['c-wire', 'wire'], ['c-passengers', 'passengers'], ['c-schedule', 'schedule'],
@@ -468,12 +619,15 @@ function boot() {
     }
     const isDepot = v === LANE.DEPOT;
     const center = nearestStationS(isDepot ? 'depot' : 'station');
-    const lane = isDepot ? alignment().depotLane(center) : alignment().stationLane(center, 1);
+    const lane = isDepot
+      ? alignment().depotLane(center)
+      : stationLaneFor(center, stationIdAt(center));
     runtime.setLane(lane);
-    // 跳到进岔前，让 300 m 缓和段的横移能实际看见
-    runtime.setTravel(center - lane.approach - 200);
-    setRunning(true);
-    notice(isDepot ? '经道岔进入段管线' : '经进站道岔转入到发线');
+    // 只排进路，**绝不传送里程、绝不替玩家发车**。列车开到道岔前时，
+    // alignment.stationLane() 的 300 m 缓和段会自然把车横移到到发线。
+    // 旧版这里 setTravel() 直接把车瞬移到进岔前 200 m，正是「开车一闪」的来源。
+    notice(isDepot ? '进路已排：段管线 · 请自行牵引经过道岔'
+      : '进路已排：到发线 · 请自行牵引进站并对标停车');
   });
   $('a-dwell').addEventListener('click', () => {
     const dir = runtime.state.dir;
@@ -483,17 +637,24 @@ function boot() {
       : [...nodes].reverse().find((n) => n.km * 1000 < runtime.state.s - 400);
     if (!target) { notice('前方没有可停靠车站'); return; }
     const center = target.km * 1000;
-    runtime.setLane(alignment().stationLane(center, 1));
+    runtime.setLane(stationLaneFor(center, target.stationId ?? target.name));
     $('c-lane').value = 'station';
-    runtime.setTravel(center + (dir === DIRECTION.FORWARD ? -320 : 320));
-    runtime.setDoorRequest(null);
-    setRunning(true);
-    notice(`准备进站 · ${target.name}`);
+    const dist = Math.abs(center - runtime.state.s);
+    // 只做「预告 + 排进路」：不传送、不发车、不替玩家停车。
+    notice(`前方 ${target.name} · 还有 ${(dist / 1000).toFixed(1)} km · 到发线进路已排，请自行牵引并对标停车`);
   });
   $('c-doors').addEventListener('change', (e) => {
     const v = e.target.value;
-    runtime.setDoorRequest(v === 'auto' ? null : v === 'open');
-    notice(v === 'auto' ? '车门：自动控制' : v === 'open' ? '请求开门' : '请求关门');
+    if (v === 'auto') {
+      if (!runtime.state.autoDrive) {
+        e.target.value = 'close';
+        runtime.setDoorRequest(false);
+        notice('请先开启 ATO 自动对标停车，车门才会跟随运行图');
+        return;
+      }
+      runtime.setDoorRequest(null);
+      notice('车门跟随 ATO');
+    } else requestDoors(v === 'open');
   });
   $('c-cammode').addEventListener('change', (e) => {
     runtime.setCameraMode(e.target.value);
@@ -573,19 +734,56 @@ function boot() {
   function syncRunButton() {
     const on = runtime.state.running;
     runBtn.classList.toggle('is-on', on);
-    $('run-label').textContent = on ? '停止' : '前进';
+    $('run-label').textContent = on ? '惰行' : '牵引';
   }
-  runBtn.addEventListener('click', () => { setRunning(!runtime.state.running); syncRunButton(); });
+  /** 空格 / 按钮 = 牵引与惰行切换（松牵引不等于刹车，停车请用 S 或制动滑杆）。 */
+  function toggleTraction() {
+    const on = !runtime.state.running;
+    setRunning(on);
+    if (on) { runtime.setBrake(0); runtime.setEmergency(false); }
+    syncDriveUi();
+    syncRunButton();
+  }
+  runBtn.addEventListener('click', toggleTraction);
+
+  // 键盘：W/S 牵引与制动级位、D/C 开关门、B 紧急制动、R 换向、空格惰行。
+  // 焦点在表单控件上时不抢键，避免和滑杆 / 下拉冲突。
+  // 点过任何按钮后主动 blur：否则焦点留在 <button> 上，下面 keydown 的排除规则
+  // 会让 W/S/D/C/B/R 全部失效（实测点一次「牵引」后键盘就哑了）。
+  document.addEventListener('click', (e) => {
+    const btn = e.target?.closest?.('button');
+    if (btn) btn.blur();
+  }, true);
+
   addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement?.tagName ?? '')) {
-      e.preventDefault();
-      setRunning(!runtime.state.running);
-      syncRunButton();
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '')) return;
+    const st = runtime.state;
+    switch (e.code) {
+      case 'Space': e.preventDefault(); toggleTraction(); break;
+      case 'KeyW': case 'ArrowUp':
+        e.preventDefault(); runtime.setThrottle(Math.min(1, st.throttle + 0.1)); syncDriveUi(); syncRunButton(); break;
+      case 'KeyS': case 'ArrowDown':
+        e.preventDefault(); runtime.setBrake(Math.min(1, st.brake + 0.1)); syncDriveUi(); syncRunButton(); break;
+      case 'KeyD': e.preventDefault(); requestDoors(true); break;
+      case 'KeyC': e.preventDefault(); requestDoors(false); break;
+      case 'KeyB':
+        e.preventDefault(); runtime.setEmergency(!st.emergency);
+        notice(st.emergency ? '紧急制动缓解' : '紧急制动 · 1.6 m/s²');
+        syncDriveUi(); syncRunButton(); break;
+      case 'KeyR':
+        e.preventDefault();
+        if (st.velocity > 0.3) notice('请先停稳再逻辑掉头');
+        else $('a-reverse').click();
+        break;
+      default: break;
     }
   });
 
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.05);
+    // 以前硬 clamp 到 0.05：一旦掉到 20 fps 以下，仿真时间就只有真实时间的
+    // 几分之一，表现为「加速慢、画面一顿一顿」。放宽到 0.2 s（约 5 fps 仍实时），
+    // 与 framework 的 dt 上限保持一致；450 m 的停车区间不会被单帧跨过。
+    const dt = Math.min(clock.getDelta(), 0.2);
     elapsed += dt;
     runtime.update(dt);
 
@@ -596,9 +794,13 @@ function boot() {
       runtime.setLane(LANE.MAIN);
       $('c-lane').value = 'main';
     }
-    if (st.doorRequest === null && $('c-doors').value !== 'auto') $('c-doors').value = 'auto';
+    // 车门下拉只反映状态，绝不反向把玩家的手动请求改回「自动」
+    if (st.doorRequest === true && $('c-doors').value !== 'open') $('c-doors').value = 'open';
+    else if (st.doorRequest === false && $('c-doors').value === 'open') $('c-doors').value = 'close';
+    syncDriveUi();
 
     sky.position.copy(cam.position);
+    if (sunSprite) sunSprite.position.copy(cam.position).add(sunOffset);
     renderer.render(scene, cam);
 
     // ---- HUD ----
@@ -607,10 +809,25 @@ function boot() {
     $('kmh').textContent = kmh.toFixed(0);
     $('gauge-fill').style.width = `${Math.min(100, (kmh / MOTION.maxKmh) * 100)}%`;
     $('odo').textContent = `${km.toFixed(2)} km`;
-    const status = st.running ? (kmh < st.targetKmh - 1 ? '加速' : '运行') : kmh > 0.5 ? '制动' : '停车';
+    const cruise = Math.min(st.targetKmh, st.atpLimitKmh);
+    const status = st.emergency ? '紧急制动'
+      : st.brake > 0 ? '制动'
+      : st.running ? (kmh < cruise - 1 ? '牵引' : '恒速')
+      : kmh > 0.5 ? '惰行' : '停车';
     if ($('state').textContent !== status) {
       $('state').textContent = status;
-      $('state').className = st.running ? 'run' : kmh > 0.5 ? 'brake' : '';
+      $('state').className = st.running ? 'run' : (st.brake > 0 || st.emergency) ? 'brake' : '';
+    }
+    $('atp-note').textContent = `ATP ${Math.round(st.atpLimitKmh)} · ${st.autoDrive ? 'ATO' : '手动'}`;
+    const stopEl = $('stop-note');
+    if (st.stopZone && st.doorsCanOpen) {
+      const err = st.stopErrorM;
+      const onMark = err !== null && Math.abs(err) <= 0.5;
+      stopEl.textContent = `对标停车：${err === null ? '—' : `${err > 0 ? '+' : ''}${err.toFixed(2)} m`} · ${st.stopped ? (onMark ? '已停稳 · 可开门' : '已停稳 · 未对标') : '运行中'}`;
+      stopEl.className = `hintline ${st.stopped ? (onMark ? 'is-good' : 'is-off') : ''}`;
+    } else {
+      stopEl.textContent = '对标停车：不在停车区间';
+      stopEl.className = 'hintline';
     }
     syncRunButton();
     $('progress-fill').style.width = `${Math.min(100, (km / route.officialKm) * 100)}%`;
@@ -646,7 +863,9 @@ function boot() {
       [DOOR_STATE.OPEN]: '车门开启 · 上下客中',
       [DOOR_STATE.OPENING]: '车门开启中',
       [DOOR_STATE.CLOSING]: '车门关闭中',
-      [DOOR_STATE.CLOSED]: st.doorsCanOpen ? '可开门 · 两端车门均在区间内' : '车门关闭 · 未在停车区间',
+      [DOOR_STATE.CLOSED]: st.doorsCanOpen
+        ? (st.stopped ? '可开门 · 全列在区间内（按 D）' : '先停稳列车再开门')
+        : '车门关闭 · 未在停车区间',
       [DOOR_STATE.BLOCKED]: '禁止开门 · 车门越出区间',
     }[st.doorState.state] ?? '车门关闭';
     doorEl.textContent = `${doorTxt}${ev?.doorMileages?.length ? ` · 余量 ${Math.max(0, Math.min(ev.frontMargin, ev.rearMargin)).toFixed(0)} m` : ''}`;
@@ -715,6 +934,13 @@ function boot() {
         km: st.s / 1000,
         kmh: st.velocity * 3.6,
         moving: st.running,
+        throttle: st.throttle,
+        brake: st.brake,
+        emergency: st.emergency,
+        autoDrive: st.autoDrive,
+        stopped: st.stopped,
+        stopErrorM: st.stopErrorM,
+        atpLimitKmh: st.atpLimitKmh,
         chunks: chunkSys?.size?.() ?? 0,
         chunkKinds: runtime.chunks.map((c) => c.kind),
         model: S.modelId,
@@ -747,12 +973,19 @@ function boot() {
     };
     window.CNTHUB_JOURNEY.camera = cam;
     window.CNTHUB_JOURNEY.scene = scene;
+    window.CNTHUB_JOURNEY.THREE = THREE;   // 仅 DEV：射线诊断 / 截图脚本用
     window.CNTHUB_JOURNEY.renderer = renderer;
     window.CNTHUB_JOURNEY.controls = camSys;
     window.CNTHUB_JOURNEY.runtime = runtime;
     window.CNTHUB_JOURNEY.api = {
       setTravel(m) { runtime.setTravel(m); },
       setRunning,
+      setThrottle: (v) => runtime.setThrottle(v),
+      setBrake: (v) => runtime.setBrake(v),
+      setEmergency: (v) => runtime.setEmergency(v),
+      setTargetKmh: (v) => runtime.setTargetKmh(v),
+      setAutoDrive: (v) => runtime.setAutoDrive(v),
+      requestDoors,
       applyView,
       applyTheme,
       applyQuality,

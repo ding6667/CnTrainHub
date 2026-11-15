@@ -40,14 +40,18 @@
         </section>
 
         <section class="grp">
-          <h2>运行</h2>
-          <div class="row"><label for="c-speed">演示速度</label><output id="o-speed">120 km/h</output><input id="c-speed" type="range" min="0" max="300" step="5" value="120" /></div>
-          <div class="row"><label for="c-accel">加速度</label><output id="o-accel">18 m/s²</output><input id="c-accel" type="range" min="2" max="60" step="1" value="18" /></div>
+          <h2>驾驶台 <span class="badge" id="drive-mode">手动驾驶</span></h2>
+          <div class="row"><label for="c-speed">目标速度</label><output id="o-speed">120 km/h</output><input id="c-speed" type="range" min="0" max="300" step="5" value="120" /></div>
+          <div class="row"><label for="c-accel">牵引加速度</label><output id="o-accel">4.0 m/s²</output><input id="c-accel" type="range" min="0.2" max="8" step="0.1" value="4" /></div>
+          <div class="row"><label for="c-throttle">牵引 / T</label><output id="o-throttle">0%</output><input id="c-throttle" type="range" min="0" max="100" step="5" value="0" /></div>
+          <div class="row"><label for="c-brake">制动 / B</label><output id="o-brake">0%</output><input id="c-brake" type="range" min="0" max="100" step="5" value="0" /></div>
           <div class="row"><label for="c-dir">行驶方向</label><select id="c-dir"><option value="1">正向 · 里程递增</option><option value="-1">反向 · 里程递减</option></select></div>
+          <div class="row switch"><label for="c-ato">ATO 自动对标停车</label><input id="c-ato" type="checkbox" class="tgl" /></div>
           <div class="acts">
             <button id="a-reverse" type="button">逻辑掉头</button>
-            <button id="a-dwell" type="button" class="primary">进站停车</button>
+            <button id="a-emergency" type="button" class="danger">紧急制动</button>
           </div>
+          <p class="hintline" id="drive-note">停稳后按 D 开门 · W/S 增减牵引与制动</p>
           <p class="hintline" id="align-note">直线 · 平坡 · 正线</p>
           <div class="progress"><i id="progress-fill"></i></div>
           <p class="hintline" id="progress-label">0.0 / 0.0 km</p>
@@ -56,8 +60,14 @@
         <section class="grp">
           <h2>进路与车门</h2>
           <div class="row"><label for="c-lane">进路</label><select id="c-lane"><option value="main">正线通过</option><option value="station">到发线 · 经道岔进站</option><option value="depot">段管线 · 进出车辆段</option></select></div>
-          <div class="row"><label for="c-doors">车门</label><select id="c-doors"><option value="auto">自动（两端车门在区间内）</option><option value="open">请求开门</option><option value="close">请求关门</option></select></div>
+          <div class="row"><label for="c-doors">车门</label><select id="c-doors"><option value="close">关门（默认）</option><option value="open">请求开门</option><option value="auto">跟随 ATO</option></select></div>
+          <div class="acts">
+            <button id="a-doors-open" type="button" class="primary">开门 D</button>
+            <button id="a-doors-close" type="button">关门 C</button>
+            <button id="a-dwell" type="button">预告进站</button>
+          </div>
           <p class="hintline" id="door-note">车门关闭 · 待进站</p>
+          <p class="hintline" id="stop-note">对标停车：—</p>
         </section>
 
         <section class="grp">
@@ -112,10 +122,10 @@
       <div id="gauge">
         <div id="gauge-num"><span id="kmh">0</span><em>km/h</em></div>
         <div id="gauge-bar"><i id="gauge-fill"></i></div>
-        <div id="gauge-meta"><span id="odo">0.00 km</span><span id="state">停车</span></div>
+        <div id="gauge-meta"><span id="odo">0.00 km</span><span id="atp-note">ATP 300</span><span id="state">停车</span></div>
       </div>
-      <button id="run" type="button"><span class="dot"></span><span id="run-label">前进</span></button>
-      <p id="hint">左键调角度 · 中键调机位 · 滚轮远近 · 空格启停</p>
+      <button id="run" type="button"><span class="dot"></span><span id="run-label">牵引</span></button>
+      <p id="hint">W/S 牵引·制动 · D/C 开关门 · 空格惰行 · B 紧急制动 · 左键/中键/滚轮调镜头</p>
     </div>
 
     <dl id="specs">

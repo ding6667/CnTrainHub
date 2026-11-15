@@ -788,9 +788,15 @@ export function createScheduleSystem(ctx, opts = {}) {
 
     const st = c?.state;
     if (st) {
-      st.autoDwell = policy.autoDwell;
-      st.autoDepart = policy.autoDepart;
-      st.doorRequest = policy.doorRequest;
+      // 手动驾驶（state.autoDrive === false，默认）时运行图**只提供信息**，
+      // 绝不接管车门 / 停站 / 发车 —— 否则玩家刚点「开门」就被策略覆盖回 null，
+      // 又变成「系统自己动、玩家没操作权」。只有打开 ATO 才写回这三个字段。
+      // 用 !== false 判定，让不带 autoDrive 的 mock ctx 仍走原来的 hook 逻辑。
+      if (st.autoDrive !== false) {
+        st.autoDwell = policy.autoDwell;
+        st.autoDepart = policy.autoDepart;
+        st.doorRequest = policy.doorRequest;
+      }
       if (st.stopZone && Number.isFinite(policy.dwellSec)) st.stopZone.dwellSec = policy.dwellSec;
       st.timetable = {
         ...(st.timetable ?? {}),

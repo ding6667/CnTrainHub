@@ -78,6 +78,28 @@
 #door-note.is-blocked { color: var(--red); }
 #o-service, #o-nextstop { font-size: 11px; }
 #c-dir, #c-lane, #c-doors, #c-cammode { max-width: 100%; }
+
+/* 驾驶台：模式徽标、紧急制动、对标读数 */
+h2 .badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border: 1px solid rgba(227, 166, 58, 0.45);
+  border-radius: 99px;
+  color: var(--gold);
+  font: 600 10px var(--mono);
+  letter-spacing: 0.06em;
+  vertical-align: 2px;
+}
+h2 .badge.is-ato { border-color: #7fe0a8; color: #7fe0a8; }
+button.danger { border-color: rgba(220, 74, 74, 0.6); color: #ff9a8f; }
+button.danger:hover { background: rgba(220, 74, 74, 0.16); }
+#stop-note.is-good { color: #7fe0a8; }
+#stop-note.is-off { color: var(--red); }
+#o-throttle, #o-brake { color: var(--gold); }
+#atp-note { color: var(--muted); font: 500 10px var(--mono); }
+#drive-note { color: #a8c4e0; }
+#hint { max-width: 46ch; }
 @media (max-height: 780px) {
   #specs { max-height: 96px; overflow: auto; }
 }

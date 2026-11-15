@@ -74,7 +74,7 @@ function makeHarbinBuilder(shared) {
     // 所以实体只相对「本块所在的进路」做线侧摆放。
 
     /** 一类楼 = 一个 InstancedMesh = 1 次 draw call。 */
-    function addBuildings(factor) {
+    function addBuildings(factor, minX = 38) {
       const cats = ['residential', 'office', 'commercial'];
       const cat = cats[Math.abs(c.id) % cats.length];
       const types = (BUILDING_CATALOG || []).filter((b) => b.category === cat);
@@ -86,7 +86,9 @@ function makeHarbinBuilder(shared) {
       for (let i = 0; i < n; i += 1) {
         const side = i % 2 ? 1 : -1;
         specs.push({
-          x: side * (38 + Math.abs(c.id % 3) * 44 + r() * 24),
+          // 站区（HUB）传 minX≈132 把楼群推到 226 m 宽站场之外，否则楼会插进
+          // 无柱雨棚屋面、从俯瞰看像「浮在屋盖上」的方块。
+          x: side * (minX + Math.abs(c.id % 3) * 44 + r() * 24),
           z: -((i + 0.5) / n) * CHUNK.length,
           rotY: r() < 0.25 ? Math.PI / 2 : 0,
           scale: 0.78 + r() * 0.55,
@@ -101,23 +103,27 @@ function makeHarbinBuilder(shared) {
       const id = stationIdFor(c);
       const field = buildStationField(id, { night, theme: S.theme, centerS, chunkLength: CHUNK.length });
       if (field) {
-        // v2 站场按「线侧站」整体摆在正线左侧：buildFieldGeometry 的 22 股道
-        // 会铺出约 226 m 宽、每座站台都有 414 m 长雨棚。若压在 x=0，两侧连续
-        // 雨棚会把 hero / 俯瞰机位看列车的视线整片挡住（车体被盖在 y=5.4 的
-        // 棚顶下）。半宽 113 m × 0.88 ≈ 100 m，取 -112 m 让站场右缘落在
-        // x≈-12，与列车（半宽 1.68 m）留出净空；站场规模仍完整可见。
-        field.position.set(-112, 0, -CHUNK.length / 2);
-        field.scale.setScalar(0.88);
+        // v3 写实站场：以列车所在正线 (x=0) 为中心贴合摆放，取消 -112 m 线侧分离，
+        // 站场与列车/正线一眼连成一体（原「站房和轨道不挨着」的根因）。
+        // 防遮挡不再靠「挪走」，而靠几何本身（见 stations.js v3 段）：
+        //  ① fieldTrackLayout 把 mainTracks=[10,11] 之间及紧邻间隙做成约 19.5 m 宽的
+        //     「中央正线通道」——无站台、无雨棚，列车固定在 x≈0 始终可见；
+        //  ② 无站台柱大跨钢桁架雨棚 = 细杆件 + 半透明采光带/屋面（transparent +
+        //     depthWrite:false），hero/side/above 机位都能透过雨棚看到车体；
+        //  ③ 跨线高架候车室架在站台上空 y≈8~12m、位于列车前方，玻璃幕墙半透明。
+        // 不再缩放：0.88 会把 RAIL 的 1.75m 站台边缘距 / 1.25m 站台高缩水，破坏契约。
+        field.position.set(0, 0, -CHUNK.length / 2);
         g.add(field);
       } else {
         const st = buildStation(id, { theme: S.theme, quality: S.quality, night });
         if (st) {
-          st.position.set(-30, 0, -CHUNK.length / 2);
-          st.scale.setScalar(0.88);
+          // v1 站房兜底（buildStationField 恒返回 Group，此分支基本不触发）：
+          // 同样贴正线中心、不缩放，保持「站房紧贴轨道」口径一致。
+          st.position.set(0, 0, -CHUNK.length / 2);
           g.add(st);
         }
       }
-      if (S.buildings !== false) addBuildings(0.6);
+      if (S.buildings !== false) addBuildings(0.6, 132);
     } else if (c.kind === CHUNK_KIND.DEPOT && c.primary && S.stations !== false) {
       const d = buildDepot(depotKindFor(c), { theme: S.theme, night });
       if (d) {

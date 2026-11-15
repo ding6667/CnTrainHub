@@ -1101,9 +1101,9 @@ function labelTexture(text) {
   const cv = document.createElement('canvas');
   cv.width = 512; cv.height = 128;
   const x = cv.getContext('2d');
-  x.fillStyle = '#12324a'; x.fillRect(0, 0, 512, 128);
-  x.strokeStyle = '#ffd23f'; x.lineWidth = 6; x.strokeRect(8, 8, 496, 112);
-  x.fillStyle = '#ffe27a'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = '#0b57a4'; x.fillRect(0, 0, 512, 128);                    // 蓝底
+  x.strokeStyle = '#ffffff'; x.lineWidth = 5; x.strokeRect(8, 8, 496, 112); // 白框
+  x.fillStyle = '#ffffff'; x.textAlign = 'center'; x.textBaseline = 'middle'; // 白字
   x.font = 'bold 46px "Microsoft YaHei","PingFang SC","SimHei",sans-serif';
   x.fillText(text, 256, 64);
   const tex = new THREE.CanvasTexture(cv);
@@ -1114,139 +1114,772 @@ function labelTexture(text) {
   return tex;
 }
 
-/**
- * 按真实布局画站场几何（纯往 collector 里塞 box / post / sleeper，不组装）。
- * 局部原点 = 站场中心，轨道沿 Z，所有几何以 z=0 对称；由集成层摆位，见文件头。
- */
-function buildFieldGeometry(c, layout, quality) {
-  const P = Math.max(1, layout.platformCount);
-  const T = Math.max(1, layout.trackCount);
-  const PL = Number(layout.platformLength) || RAIL.platformLength;
-  const PW = Number(layout.platformWidth) || RAIL.platformWidth;
-  const PH = Number.isFinite(layout.platformHeight) ? layout.platformHeight : RAIL.platformHeight;
-  const EDGE = Number.isFinite(layout.platformEdge) ? layout.platformEdge : RAIL.platformEdge;
-  const half = PL / 2;
+// ═══════════════════════════════════════════════════════════════════════════
+//  v3 写实站场（站场 / 站房写实子 agent）
+//  —— 替换 v2 的 buildFieldGeometry / composeField / instantiateField。
+//  导出与签名绝对不变：buildStationField / buildStation / buildDepot /
+//  createStationSystem / STATION_CATALOG / stationById / disposeStations /
+//  STATION_LAYOUTS / DEPOT_LAYOUTS / layoutFor / HARBIN_PACK 全部原样。
+//
+//  【本次联网核实的关键尺寸与来源（写进注释，不改任何站场数据）】
+//   * 哈尔滨西站站线布置图（维基百科镜像）
+//     https://www.cnys1.tv/wikipedia/zh-hans/哈尔滨西站
+//     → 京哈高铁正线 8/9 道夹在 7、8 号站台之间，两条正线彼此相邻、中间无站台；
+//       站台在到发线外侧（…7号站台-到发线7道-正线8道-正线9道-到发线10道-8号站台…）。
+//       本文件据此把 layout.mainTracks=[10,11] 之间及其紧邻间隙做成「中央正线通道」，
+//       无站台、无雨棚，让固定在 x≈0 的列车一眼可见。
+//     → 站房由「东站房 + 西站房 + 高架候车室」组成；东站房高 47.5m、西 37.5m，
+//       建筑南北总长 192m、东西总长 313.5m，站房约 69996㎡。→ 采用跨线高架候车室。
+//   * 东北网 2012《哈西客站昨起试运营》
+//     https://heilongjiang.big5.dbw.cn/system/2012/10/09/054282178.shtml
+//     → 「无柱雨棚面积 8 万余平方米」「10 座站台、18 条到发线、4 条正线」。
+//   * 火车票网 2012《哈尔滨西客站半揭面纱 共设有 10 个站台 22 条线路》
+//     http://news.huochepiao.com/2012-4/20124158514728.htm
+//     → 「月台无站台柱」「月台上共设有全长 8300 米的盲道」「候车厅内安装了三层
+//       直通的 16 部直梯」「电子检票系统」。→ 无站台柱雨棚、盲道、电梯/直梯。
+//   * 360 百科《哈尔滨西客站》
+//     https://upimg.baike.haosou.com/doc/6563476-6777232.html
+//     → 「东、西站房、高架候车室组成」「无站台柱雨棚投影面积 83068㎡」。
+//   * 无站台立柱式雨棚（搜狗百科，北京站无柱雨棚）
+//     https://baike.sogou.com/v143459186.htm
+//     → 连续拱形桁架一次跨越 2 个站台，最大跨 46m，南北悬挑 20.5m；
+//       「上弦最高处与轨顶距离 15m，最低处为 6m」→ 雨棚檐口最低净空取 6.2m；
+//       「股道上方 4m 宽透空不封顶」→ 中央采光带 / 半透明屋面；
+//       桁架间距 32m、34m → 柱网取 24m（任务指定，同量级）。
+//   * 瑶海钢构《合肥火车站无站台柱雨棚钢结构工程》
+//     https://www.yaohaiganggou.com/company_awards/detail/21.html
+//     → 单层钢管桁架、倒三角截面 2.0×2.8m、平均跨距 25m；屋面银灰镀铝锌彩钢板、
+//       米白铝镁锰条形板吊顶、FRP 聚氨酯采光板、氟碳喷涂铝板檐口包边。
+//       → 细杆件桁架 + 金属屋面板 + 半透明 FRP 采光带 + 金属檐口的材质/结构依据。
+//   * 央广网/人民网《兰新第二双线…高铁站台》《南宁火车站…华丽变身》
+//     https://www.cnr.cn/gsfw/gsxw/kx/201405/t20140513_515498088.shtml
+//     https://cpc.people.com.cn/n/2013/1211/c87228-23805268.html
+//     → 高站台 1.25m、宽 11.5m、防滑砖；「安全线变为白色警示线 + 黄色盲道」；
+//       「每个 LED 显示屏显示车厢号及车向」「天桥具有通下站台的阶梯和手扶电梯」
+//       「站台还设有升降电梯」。→ 安全白线/盲道/LED 屏/楼梯/扶梯/电梯连接。
+//   * 央视/今日头条《站台等车》《找车厢攻略》
+//     https://m.cnhubei.com/content/2026-02/08/content_19816782.html
+//     https://www.toutiao.com/article/7580754867669434923/
+//     → 站台地面彩色车厢号地标：蓝=8 节正编、黄=16 节正编、紫/绿=反编。
+//   * 屏蔽门：未检索到哈尔滨西站设站台屏蔽门/安全门的资料（呼和浩特东站
+//     2026「智能安全升降防护栏」属个别新设备，与本 2012 年站无关）→ 按资料口径
+//     「没有就不做，不要编造」，本站场不做屏蔽门。
+//   * 站台有效长 450m / 岛式宽 12m / 侧式 8m / 高 1.25m / 站台边缘距线路中心
+//     1.75m：广湛高铁批复(铁鉴函〔2020〕192号) 与 core.RAIL，见 station-layouts.js 文件头。
+//
+//  【预算口径】单站场 ≤ 10 draw call / ≤ 45000 三角面 / ≤ 4 张贴图：
+//   - 8 个 mesh：main(混凝土) / metal(钢构) / glass(半透明屋面+幕墙) /
+//     signage(文字图集) / sign(站名牌) / marker(停车区间标) / posts(柱,InstancedMesh) /
+//     sleepers(枕木,InstancedMesh)；
+//   - 贴图 4 张且全部共享：surface(实体质感) / signageAtlas(标识图集) /
+//     sign(站名,按站名) / label(停车区间,全局 1 张)；半透明玻璃用纯顶点色无贴图；
+//   - 重复元素（枕木、雨棚柱、灯柱、接触网柱）走 InstancedMesh；其余全部
+//     mergeGeometries 按材质合并；采光带/幕墙用 2 三角面的 Plane 而非 12 面 Box。
+// ═══════════════════════════════════════════════════════════════════════════
 
-  // 股道间距分两种：夹了站台的间隙要塞下 12 m 站台 + 两侧 1.75 m 边缘 = 15.5 m；
-  // 不夹站台的普通相邻到发线按 6.5 m（线间距 5.0 + 余量）排。
-  // 旧版把所有间隙都按 15.5 m 排，22 股道会摊成 325 m 宽的灰色巨板，
-  // 起点英雄机位半屏都被站台盖住；按真实咽喉布置混合间距后约 210 m 宽。
-  const PLAT_GAP = PW + 2 * EDGE;
-  const TRACK_GAP = RAIL.trackCenters + 1.5;
-  const nPlat = Math.min(P, Math.max(1, T - 1));
-  const hasPlatform = new Array(Math.max(0, T - 1)).fill(false);
-  for (let j = 0; j < nPlat; j += 1) {
-    const idx = nPlat === 1 ? Math.floor((T - 1) / 2) : Math.round((j * (T - 2)) / (nPlat - 1));
-    hasPlatform[Math.min(T - 2, idx)] = true;
+/** 站场几何常量（米）。均来自上面的核实资料 / core.RAIL，不凭印象拍脑袋。 */
+const FIELD = Object.freeze({
+  PLAT_H: RAIL.platformHeight,                 // 1.25 站台面高出轨顶
+  EDGE: RAIL.platformEdge,                     // 1.75 站台边缘到线路中心
+  PLAT_W: RAIL.platformWidth,                  // 12   岛式站台宽
+  TRACK_GAP: RAIL.trackCenters + 1.5,          // 6.5  不夹站台的相邻股道中心距
+  CANOPY_EAVE: 6.2,                           // 雨棚檐口最低净空（北京站无柱雨棚核实「最低 6m」）
+  CANOPY_RISE: 1.0,                           // 桁架上下弦高差
+  CANOPY_ROOF: 6.7,                           // 屋面标高
+  CANOPY_HALF: 7.9,                           // 雨棚半宽（柱位/悬挑），> 站台半宽 → 站台面无柱
+  COL_SPAN: 24,                               // 柱网 24m（任务指定；核实值 21/25/32m 同量级）
+  HALL_BASE: 8.0,                             // 跨线高架候车室楼面标高
+  HALL_H: 4.2,                                // 候车室净高
+  HALL_DEPTH: 34,                             // 顺轨方向进深
+  SKYLIGHT_W: 2.4,                            // 中央采光带半宽基准
+});
+
+// ------------------------------------------------------ 程序化「表面质感」贴图 ----
+// 近白底 + 混凝土骨料噪点 + 防滑砖/玻璃/金属板分格线 + 轻微污渍。作为 field 实体
+// 材质的 map（vertexColors 相乘，颜色仍由顶点色决定），杜绝大块纯色平板。全局 1 张。
+function fieldSurfaceTexture() {
+  const key = 'field:surface';
+  if (CACHE.texs.has(key)) return CACHE.texs.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 256;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#f3f2ee'; x.fillRect(0, 0, 256, 256);
+  const R = mulberry32(0x5eed5eed);
+  for (let i = 0; i < 2400; i += 1) {
+    const g = 202 + Math.floor(R() * 52);
+    x.fillStyle = `rgba(${g},${g},${Math.min(255, g + 2)},${(0.20 + R() * 0.35).toFixed(3)})`;
+    const s = 1 + R() * 2.6;
+    x.fillRect(R() * 256, R() * 256, s, s);
   }
+  x.strokeStyle = 'rgba(148,150,146,0.28)'; x.lineWidth = 1;
+  for (let k = 0; k <= 256; k += 32) {
+    x.beginPath(); x.moveTo(k + 0.5, 0); x.lineTo(k + 0.5, 256); x.stroke();
+    x.beginPath(); x.moveTo(0, k + 0.5); x.lineTo(256, k + 0.5); x.stroke();
+  }
+  x.strokeStyle = 'rgba(120,124,120,0.10)'; x.lineWidth = 2;
+  for (let i = 0; i < 12; i += 1) {
+    const sx = R() * 256, sy = R() * 256;
+    x.beginPath(); x.moveTo(sx, sy); x.lineTo(sx + R() * 44, sy + 6 + R() * 10); x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.flipY = false; tex.anisotropy = 4;
+  CACHE.texs.set(key, tex);
+  return tex;
+}
+
+// ------------------------------------------------ 站台标识「图集」贴图 + UV 区域 ----
+// 一张 1024×512 图集（8 列 × 4 行，格 128×128）画：站台编号 1~16、车厢号彩色地标、
+// LED 引导屏、进站/出站口、电梯/扶梯、安全提示、方向牌。所有小牌共享这一张贴图，
+// 通过 UV 取对应格子 → 单站场只占 1 张贴图，且牌面都是 2 三角面 Plane。
+const SIG = { W: 1024, H: 512, COLS: 8, ROWS: 4 };
+function sigCell(col, row, span = 1) {
+  const cw = SIG.W / SIG.COLS, ch = SIG.H / SIG.ROWS;
+  const px0 = col * cw, px1 = (col + span) * cw, py0 = row * ch, py1 = (row + 1) * ch;
+  // signageAtlas 用 flipY=true(默认)：canvas 顶行 → 纹理 v=1。
+  // 故格子顶 py0 对应较大的 v(vTop)，格子底 py1 对应较小的 v(vBot)。
+  return {
+    u0: px0 / SIG.W, u1: px1 / SIG.W,
+    vTop: 1 - py0 / SIG.H, vBot: 1 - py1 / SIG.H,
+  };
+}
+const SIG_REG = {
+  platform: (n) => sigCell((Math.min(16, Math.max(1, n)) - 1) % 8, Math.floor((Math.min(16, Math.max(1, n)) - 1) / 8)),
+  carBlue: sigCell(0, 2), carYellow: sigCell(1, 2), carGreen: sigCell(2, 2), carPurple: sigCell(3, 2),
+  led: sigCell(4, 2, 2),
+  entrance: sigCell(0, 3, 2), exit: sigCell(2, 3), lift: sigCell(3, 3),
+  escalator: sigCell(4, 3), safety: sigCell(5, 3), direction: sigCell(6, 3, 2),
+};
+
+function fieldSignageAtlas() {
+  const key = 'field:signage';
+  if (CACHE.texs.has(key)) return CACHE.texs.get(key);
+  const cv = document.createElement('canvas');
+  cv.width = SIG.W; cv.height = SIG.H;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#0d1117'; x.fillRect(0, 0, SIG.W, SIG.H);
+  const cw = SIG.W / SIG.COLS, ch = SIG.H / SIG.ROWS;
+  const cell = (col, row, span, bg, draw) => {
+    const px = col * cw, py = row * ch, pw = cw * span, ph = ch;
+    x.fillStyle = bg; x.fillRect(px + 3, py + 3, pw - 6, ph - 6);
+    x.strokeStyle = 'rgba(255,255,255,0.55)'; x.lineWidth = 3; x.strokeRect(px + 6, py + 6, pw - 12, ph - 12);
+    x.save(); x.translate(px, py);
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    draw(pw, ph);
+    x.restore();
+  };
+  // 行 0：站台编号 1~8；行 1：9~16（覆盖最多 16 台的大站）
+  for (let n = 1; n <= 16; n += 1) {
+    const col = (n - 1) % 8, row = Math.floor((n - 1) / 8);
+    cell(col, row, 1, '#123a63', (w, h) => {
+      x.fillStyle = '#eaf4ff'; x.font = 'bold 70px sans-serif';
+      x.fillText(String(n), w / 2, h / 2 - 8);
+      x.fillStyle = '#9fc4e8'; x.font = 'bold 20px sans-serif';
+      x.fillText('站台', w / 2, h - 20);
+    });
+  }
+  // 行 2 col0~3：车厢号彩色地标（蓝 8 正 / 黄 16 正 / 绿 16 反 / 紫 8 反）
+  const cars = [
+    [0, '#1f6fd0', '8', '正编·蓝'], [1, '#e8b52a', '16', '正编·黄'],
+    [2, '#2e9e63', '16', '反编·绿'], [3, '#8b5cc7', '8', '反编·紫'],
+  ];
+  for (const [col, bg, num, label] of cars) {
+    cell(col, 2, 1, bg, (w, h) => {
+      x.fillStyle = '#ffffff'; x.font = 'bold 58px sans-serif';
+      x.fillText(num, w / 2, h / 2 - 6);
+      x.font = 'bold 16px sans-serif'; x.fillText(label, w / 2, h - 18);
+      x.fillStyle = 'rgba(255,255,255,0.9)'; x.font = 'bold 18px sans-serif';
+      x.fillText('车厢', w / 2, 20);
+    });
+  }
+  // 行 2 col4~5：LED 引导屏
+  cell(4, 2, 2, '#08131f', (w, h) => {
+    x.fillStyle = '#ffd23f'; x.font = 'bold 26px sans-serif';
+    x.fillText('G1234 次  哈尔滨西 → 北京朝阳', w / 2, 30);
+    x.fillStyle = '#7dffb0'; x.font = 'bold 22px sans-serif';
+    x.fillText('08:00 开   1-8 车厢向前 →', w / 2, 70);
+    x.fillStyle = '#9fc4e8'; x.font = 'bold 18px sans-serif';
+    x.fillText('请在白色安全线内候车', w / 2, h - 18);
+  });
+  // 行 3：进站口 / 出站口 / 电梯 / 扶梯 / 安全 / 方向
+  cell(0, 3, 2, '#0e5a3a', (w, h) => {
+    x.fillStyle = '#ffffff'; x.font = 'bold 34px "Microsoft YaHei",sans-serif';
+    x.fillText('进站口', w / 2, h / 2 - 12);
+    x.font = 'bold 16px sans-serif'; x.fillText('ENTRANCE  ▶', w / 2, h / 2 + 26);
+  });
+  cell(2, 3, 1, '#3a2a0e', (w, h) => {
+    x.fillStyle = '#ffd9a0'; x.font = 'bold 24px "Microsoft YaHei",sans-serif';
+    x.fillText('出站口', w / 2, h / 2 - 6); x.font = 'bold 14px sans-serif'; x.fillText('EXIT', w / 2, h / 2 + 24);
+  });
+  cell(3, 3, 1, '#1c2a3a', (w, h) => {
+    x.fillStyle = '#dbe9ff'; x.font = 'bold 22px "Microsoft YaHei",sans-serif';
+    x.fillText('电梯', w / 2, h / 2 - 6); x.font = 'bold 14px sans-serif'; x.fillText('LIFT', w / 2, h / 2 + 24);
+  });
+  cell(4, 3, 1, '#1c2a3a', (w, h) => {
+    x.fillStyle = '#dbe9ff'; x.font = 'bold 22px "Microsoft YaHei",sans-serif';
+    x.fillText('扶梯', w / 2, h / 2 - 6); x.font = 'bold 13px sans-serif'; x.fillText('ESCALATOR', w / 2, h / 2 + 24);
+  });
+  cell(5, 3, 1, '#5a1f1f', (w, h) => {
+    x.fillStyle = '#ffd7d7'; x.font = 'bold 18px "Microsoft YaHei",sans-serif';
+    x.fillText('禁止倚靠', w / 2, h / 2 - 14); x.font = 'bold 13px sans-serif';
+    x.fillText('白色安全线', w / 2, h / 2 + 10); x.fillText('内候车', w / 2, h / 2 + 30);
+  });
+  cell(6, 3, 2, '#0d2740', (w, h) => {
+    x.fillStyle = '#cfe6ff'; x.font = 'bold 22px "Microsoft YaHei",sans-serif';
+    x.fillText('← 出站 / 换乘      候车 · 检票 →', w / 2, h / 2 - 6);
+    x.font = 'bold 15px sans-serif'; x.fillText('哈尔滨西站  Harbin West', w / 2, h / 2 + 28);
+  });
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  // flipY=true(默认) 与 sigCell/fSign 的 v 映射配套，保证牌面文字正立、取到正确格子。
+  // （v1 的 signTexture/labelTexture 是 flipY=false + makeSignGeometry 里 v 翻转，
+  //   两套贴图各自独立材质，互不干扰。）
+  tex.flipY = true; tex.anisotropy = 4;
+  CACHE.texs.set(key, tex);
+  return tex;
+}
+
+/** 惰性建 field 专用材质（不动 v1 的 'solid'/'post'/'sleeper'，保证 v1 外观不变）。 */
+function ensureFieldAssets() {
+  const surface = fieldSurfaceTexture();
+  const sig = fieldSignageAtlas();
+  const M = (k, m) => { if (!CACHE.mats.has(k)) CACHE.mats.set(k, m); return CACHE.mats.get(k); };
+  M('field:main', new THREE.MeshStandardMaterial({
+    vertexColors: true, map: surface, bumpMap: surface, bumpScale: 0.012,
+    metalness: 0.06, roughness: 0.92,
+  }));
+  M('field:metal', new THREE.MeshStandardMaterial({
+    vertexColors: true, map: surface, metalness: 0.55, roughness: 0.42,
+  }));
+  // 仅用于「小面积采光带 / 窗带 / 天窗」的半透明材质（全场半透明面压到个位数）：
+  // FrontSide + depthWrite:false + renderOrder=2（instantiateField 里设），
+  // 杜绝整片屋面/幕墙透明造成的多层叠加发灰（X 光片 bug）。屋面/墙体一律 opaque。
+  M('field:glass', new THREE.MeshStandardMaterial({
+    vertexColors: true, transparent: true, opacity: 0.34,
+    metalness: 0.10, roughness: 0.10, depthWrite: false, side: THREE.FrontSide,
+  }));
+  M('field:signage', new THREE.MeshBasicMaterial({
+    map: sig, side: THREE.DoubleSide, toneMapped: false,
+  }));
+}
+
+// ------------------------------------------------------------ field collector ----
+// 按材质分组；posts / sleepers 沿用 v1 的 post()/sleeper()（它们只认这两个数组键）。
+function newFieldCollector() {
+  return { main: [], metal: [], glass: [], signage: [], posts: [], sleepers: [] };
+}
+function fPut(arr, color, mat4, unitKey = 'box') {
+  const g = CACHE.unit[unitKey].clone();
+  g.applyMatrix4(mat4);
+  const n = g.attributes.position.count;
+  const col = new THREE.Color(color);
+  const carr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i += 1) {
+    carr[i * 3] = col.r; carr[i * 3 + 1] = col.g; carr[i * 3 + 2] = col.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(carr, 3));
+  arr.push(g);
+}
+function fBox(c, group, color, w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) {
+  fPut(c[group], color, M(x, y, z, w, h, d, rx, ry, rz));
+}
+/** 连接两点 (x0,y0,z0)-(x1,y1,z1) 的细杆（主要用在 x-y 平面桁架斜撑）。 */
+function fBeam(c, group, color, x0, y0, z0, x1, y1, z1, t) {
+  const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+  const len = Math.hypot(dx, dy, dz) || 0.001;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+  const rz = Math.atan2(dy, dx);
+  const ry = -Math.atan2(dz, Math.hypot(dx, dy));
+  fBox(c, group, color, len, t, t, cx, cy, cz, 0, ry, rz);
+}
+/** 图集小牌：带指定 UV 区域的 Plane（2 三角面），可躺平/背对背。 */
+function fSign(c, reg, x, y, z, w, h, rx = 0, ry = 0, faces = null) {
+  const angles = faces || [0, Math.PI];
+  for (const a of angles) {
+    const plane = new THREE.PlaneGeometry(w, h);
+    const uv = plane.attributes.uv;
+    for (let i = 0; i < uv.count; i += 1) {
+      const u = uv.getX(i), v = uv.getY(i);
+      uv.setXY(i, reg.u0 + u * (reg.u1 - reg.u0), reg.vBot + v * (reg.vTop - reg.vBot));
+    }
+    let g = plane;
+    if (plane.index) { g = plane.toNonIndexed(); plane.dispose(); }
+    g.applyMatrix4(M(x, y, z, 1, 1, 1, rx, ry + a, 0));
+    c.signage.push(g);
+  }
+}
+function mergeGroup(arr) {
+  if (!arr.length) return null;
+  const g = mergeGeometries(arr, false) || new THREE.BufferGeometry();
+  arr.forEach((p) => p.dispose());
+  CACHE.geos.add(g);
+  return g;
+}
+
+// ------------------------------------------------ 站台/股道横向布局（对称 + 中央留空） ----
+/**
+ * 【局部坐标 x=0 的基准契约 · 与 track.js / alignment.js 同源，勿误用】
+ * 站场 Group 挂在 chunk group 下，chunk 矩阵来自 alignment.localMatrixAt(centerS,
+ * ctx.s, {dir, lane})。frameAt 的 lateral = laneOffset + runningOffset(dir) + o.lateral，
+ * localMatrixAt 的 A、B 两帧都含同样的 runningOffset(dir)（LEFT/FORWARD = -2.5），
+ * createChunkSystem 未传 lateral → s=s0 时 M=单位阵，故局部原点 x=0 = **运行线
+ * （本线 / 列车所在线）**，正是 track.js 画双线正线时 x=0 的那条。field.position.x
+ * =0，故站场 x=0 与 track.js 本线 x=0 对齐、无平移误差（真机 probe 已确认中央干净、
+ * 站台对称、无双重轨，根因是同源而非 harbin.js 额外消化）。
+ *   - 双线「线路中心」（几何中点）在 x=+2.5、对向正线在 x=+5.0（LEFT/FORWARD；
+ *     REVERSE 符号翻），这是相对运行线，不是相对本函数 tx 的对称中心。
+ *   - 本函数 tx 以运行线 x=0 为对称轴建示意布局（哈西真实站场是正线偏一侧展开的
+ *     一站两场，此处按原 prompt「列车所在 x≈0 是正线之一 + 站台分布两侧」做对称示意）；
+ *     中央通道 |x|<9.75 留空交给 track.js 的双线正线，二者不重叠。
+ *   ⚠ 以后加道岔 / 停车位置标 / CPⅢ 等需「相对线路中心」精度的几何时，切记 x=0 是
+ *     运行线而非双线中点。对齐线路中心**直接复用 track.js 的现成基准**
+ *     `centerLat = -(runningOffset + laneOffset)`（LEFT/FORWARD = +2.5，栅栏/声屏障/
+ *     边坡/接触网柱/公里标全用它）——别硬编码 +2.5 常量、更不必整体平移站场
+ *     （track-terrain-realism 提供该锚点）。
+ *
+ * 返回 { tx, has, span }。tx 为每条股道中心 x（站场关于运行线 x=0 对称），has[j] 表示
+ * track j 与 j+1 之间是否夹站台。核心：把 mainTracks 之间及其紧邻间隙做成
+ * 「中央正线通道」——无站台、无雨棚，列车固定在 x≈0 一眼可见（哈西 wiki 正线
+ * 8/9 道夹在 7/8 号站台之间、彼此相邻且中间无站台）。站台对称分布到通道两侧。
+ */
+function fieldTrackLayout(layout) {
+  const T = Math.max(1, layout.trackCount);
+  const P = Math.max(1, layout.platformCount);
+  const PW = Number(layout.platformWidth) || FIELD.PLAT_W;
+  const EDGE = Number.isFinite(layout.platformEdge) ? layout.platformEdge : FIELD.EDGE;
+  const PLAT_GAP = PW + 2 * EDGE;           // 夹站台的股道中心距 = 12 + 3.5 = 15.5
+  const gaps = T - 1;
+  const nPlat = Math.min(P, Math.max(1, gaps));
+  const mains = (Array.isArray(layout.mainTracks) && layout.mainTracks.length)
+    ? layout.mainTracks : [Math.floor((T - 1) / 2), Math.floor(T / 2)];
+  const lo = Math.min(...mains), hi = Math.max(...mains);
+  // 大站：中央清空 [lo-1, hi]（两正线之间 + 两侧各一条到发线间隙，共 3 个）；
+  // 小站：只清两正线之间那 1 个间隙，避免站台没地方放。
+  let clearLo, clearHi;
+  if (T >= 8) { clearLo = lo - 1; clearHi = hi; }
+  else { clearLo = lo; clearHi = hi - 1; }
+  clearLo = Math.max(0, clearLo); clearHi = Math.min(gaps - 1, clearHi);
+
+  const has = new Array(gaps).fill(false);
+  const leftMax = clearLo - 1;
+  const rightMin = clearHi + 1;
+  const leftCount = Math.max(0, leftMax + 1);
+  const rightCount = Math.max(0, gaps - rightMin);
+  const perSide = Math.min(Math.floor(nPlat / 2), leftCount, rightCount);
+  const pick = (a, b, n) => {
+    if (n <= 0) return [];
+    if (n === 1) return [Math.round((a + b) / 2)];
+    return Array.from({ length: n }, (_, k) => Math.round(a + (k * (b - a)) / (n - 1)));
+  };
+  for (const j of pick(0, leftMax, perSide)) {
+    has[j] = true;
+    has[gaps - 1 - j] = true;              // 镜像到右段 → 站场关于中心严格对称
+  }
+  // 奇数/空间富余时把剩余站台补到两端外侧（仍避开中央通道）
+  let placed = has.filter(Boolean).length;
+  for (let j = 0; j < gaps && placed < nPlat; j += 1) {
+    if (!has[j] && (j < clearLo || j > clearHi)) { has[j] = true; placed += 1; }
+  }
+
   const tx = [0];
-  for (let j = 0; j < T - 1; j += 1) tx.push(tx[j] + (hasPlatform[j] ? PLAT_GAP : TRACK_GAP));
+  for (let j = 0; j < gaps; j += 1) tx.push(tx[j] + (has[j] ? PLAT_GAP : FIELD.TRACK_GAP));
   const midX = (tx[0] + tx[T - 1]) / 2;
   for (let i = 0; i < T; i += 1) tx[i] -= midX;
+  return {
+    tx, has, span: tx[T - 1] - tx[0], T, gaps, EDGE, PW,
+    // 中央正线通道的 x 边界（连片屋面在此让空，保证列车可见 / 供乘客 x 区间对齐）
+    clearX0: tx[clearLo], clearX1: tx[clearHi + 1],
+  };
+}
 
-  // 股道长度严格按 layout.trackLengths 的真实 / 示意值，不许一律 400 m 了事。
+// ------------------------------------------------------------ 站场几何主体 ----
+/**
+ * 按真实站台数 / 股道数 / 有效长画站场。局部原点 = 站场中心，轨道沿 Z，几何以
+ * z=0 对称；由集成层摆位。所有站台体底 y=0、顶 y=1.25，钢轨/道床/枕木全在 y≤0，
+ * 雨棚柱/桁架/站房全在站台面 1.25 以上——绝不穿轨顶 y=0。
+ */
+function buildFieldGeometry(c, layout, quality) {
+  const { tx, has, span, T, gaps, EDGE, PW, clearX0, clearX1 } = fieldTrackLayout(layout);
+  const PL = Number(layout.platformLength) || RAIL.platformLength;   // 450
+  const half = PL / 2;
+  const step = quality === 'low' ? 18 : quality === 'high' ? 9 : 14;  // 枕木示意刻度（省面）
   const trackLen = (i) => {
     const a = layout.trackLengths;
     const v = Array.isArray(a) ? Number(a[Math.min(i, a.length - 1)]) : NaN;
     return Math.max(PL, Number.isFinite(v) ? v : 650);
   };
-  // 站场枕木只作示意：22 股道 × 650 m 若按正线 0.6 m 实铺会到几十万面。
-  // 这里按 6~10 m 一根「刻度式」示意，股道条数与有效长仍严格按 layout 的真实值。
-  const step = quality === 'low' ? 10 : quality === 'high' ? 6 : 8;
+  const zLen = Math.max(...Array.from({ length: T }, (_, i) => trackLen(i)));
 
-  // ---- 每条到发线：2 股钢轨（顶 y=0，全在 y≤0）+ 枕木（InstancedMesh）----
+  // ---- 股道：每股道一条道床（分股道铺，不做整块大灰板）+ 2 钢轨 + 枕木实例 ----
+  // 【站区正线交给 track.js，避免双重轨/穿模】track-terrain-realism 核实：
+  // 站区双线正线由 track.js 的 CRTSⅢ 无砟轨道 ribbon 全局连续画（中心 x=±2.5、
+  // 底座 |x|∈[1.05,3.95]、轨道板顶 y=-0.205，站区不省略、不会露地面）。站场若在
+  // 中央再铺有砟道床(y∈[-0.5,-0.1])+钢轨+枕木，会盖住轨道板、把钢轨埋进碎石，
+  // 且与正线错开 0.75m 形成 4 条平行钢轨的穿模。故站场省略「道床内缘侵入正线
+  // 底座外缘+净距」的股道：track-terrain 建议到发线道床内缘 ≥4.6m（与底座 3.95
+  // 留 0.65m 净距）即绝对安全，道床半宽 ballastWidth/2=2.6 → 判据 |tx[i]| <
+  // 4.6+2.6=7.2 的股道交给 track.js、站场不画。VAB 即省略 tx[10]/tx[11]=±3.25
+  // （layout.mainTracks=[10,11]），保留 ±9.75 及更外侧到发线（道床内缘 7.15≥4.6）。
+  // 奇数股道/非对称站台分布的大站(MDB 17线/VBB)中央会挤 3 条股道(±6.5/0)，按
+  // 同一净空准则一并省略（中央略空属示意级取舍，优先杜绝双重轨穿模）；根因是
+  // fieldTrackLayout 镜像放置在不对称站的既有缺陷，此处不动站台 x 分布以护住
+  // 与 passengers.js/camera.js 已对齐的几何契约。小站(T<8)为既有示意布局，保持原样。
+  const CLEAR_INNER = 4.6;                                 // 到发线道床内缘下限（m）
+  const skipEdge = CLEAR_INNER + RAIL.ballastWidth / 2;    // = 7.2
+  const skipCenterTrack = T >= 8
+    ? (i) => Math.abs(tx[i]) < skipEdge
+    : () => false;
   for (let i = 0; i < T; i += 1) {
-    const cx = tx[i];
-    const L = trackLen(i);
+    if (skipCenterTrack(i)) continue;   // 中央正线由 track.js 统一画，站场不重复铺
+    const cx = tx[i], L = trackLen(i);
+    fBox(c, 'main', 0x7c7a70, RAIL.ballastWidth, 0.4, L, cx, -0.30, 0);   // 道床 y∈[-0.5,-0.1]
     for (const s of [-1, 1]) {
-      box(c, 0x9aa0a6, 0.12, 0.14, L, cx + s * RAIL.railHalf, -0.07, 0);
+      fBox(c, 'metal', 0x9aa2aa, 0.12, 0.14, L, cx + s * RAIL.railHalf, -0.07, 0);
     }
     for (let z = -L / 2 + 1; z < L / 2; z += step) {
       sleeper(c, cx, -0.13, z, RAIL.sleeperLength, RAIL.sleeperThickness, 0.26);
     }
   }
 
-  // ---- 站台：只嵌在 hasPlatform 标记为 true 的股道间隙里 ----
+  // ---- 站台 + 无柱大跨钢桁架雨棚 + 站台细节 ----
+  const platCenters = [];
   let platIndex = 0;
-  for (let j = 0; j < T - 1; j += 1) {
-    if (!hasPlatform[j]) continue;
-    const left = tx[j];
-    const right = tx[j + 1];
-    const kind = (layout.platformKinds && layout.platformKinds[platIndex]) || 'island';
+  for (let j = 0; j < gaps; j += 1) {
+    if (!has[j]) continue;
     platIndex += 1;
-    const usable = Math.max(4, right - left - 2 * EDGE);
-    const w = Math.min(kind === 'side' ? 8 : PW, usable);   // 规范：侧式 8 m、岛式 12 m
+    const left = tx[j], right = tx[j + 1];
     const px = (left + right) / 2;
-    // 站台体：底 y=0、顶 y=1.25，绝不穿过轨顶 y=0（红线）
-    box(c, 0xc9c2b0, w, PH, PL, px, PH / 2, 0);
-    // 站台边缘安全白线 + 盲道（两条长边，薄片贴在站台面上）
+    const w = PW;                                   // 站台居中，两边缘各距相邻股道中心 EDGE=1.75
+    platCenters.push(px);
+    const kind = (layout.platformKinds && layout.platformKinds[platIndex - 1]) || 'island';
+    const platNum = platIndex;
+
+    // 站台体：底 y=0、顶 y=1.25（不穿轨顶）；侧面用骨料质感顶点色
+    fBox(c, 'main', 0xc9c2b0, w, FIELD.PLAT_H, PL, px, FIELD.PLAT_H / 2, 0);
+    // 帽石（站台边缘一圈深色压顶）
     for (const s of [-1, 1]) {
-      box(c, 0xf2f2ea, 0.16, 0.02, PL, px + s * (w / 2 - 0.35), PH + 0.011, 0);
-      box(c, 0xd8b23a, 0.32, 0.02, PL, px + s * (w / 2 - 0.9), PH + 0.012, 0);
+      fBox(c, 'main', 0xa49c88, 0.5, 0.12, PL, px + s * (w / 2 - 0.25), FIELD.PLAT_H + 0.05, 0);
+      // 安全白线（距边 0.35）+ 黄色盲道（0.32 宽，距边 0.9）— 兰新/南宁站核实
+      fBox(c, 'main', 0xf2f2ea, 0.18, 0.02, PL, px + s * (w / 2 - 0.35), FIELD.PLAT_H + 0.015, 0); // 贴边白色安全线
+      fBox(c, 'main', 0xd8b23a, 0.34, 0.02, PL, px + s * (w / 2 - 0.75), FIELD.PLAT_H + 0.016, 0); // 黄色凸起盲道
+      fBox(c, 'main', 0xe8c33a, 0.06, 0.02, PL, px + s * (w / 2 - 1.05), FIELD.PLAT_H + 0.017, 0); // 距边 1m 黄色警戒线
     }
-    // 雨棚顶 + 雨棚柱（柱底在站台面 1.25 以上，不穿 y=0）
-    const roofY = 5.4;
-    box(c, 0x8a9298, w + 1.2, 0.22, PL * 0.92, px, roofY, 0);
-    for (let z = -half + 4; z <= half - 4; z += 24) {
-      post(c, 0x7c848a, px, (PH + roofY) / 2, z, 0.28, roofY - PH, 0.28);
+
+    // 端部车挡（红白挡块，站台两端）
+    for (const sz of [-1, 1]) {
+      fBox(c, 'main', 0xb03a30, w * 0.9, 0.8, 0.5, px, FIELD.PLAT_H + 0.4, sz * (half - 0.3));
+      fBox(c, 'main', 0xf2f2ea, w * 0.9, 0.12, 0.52, px, FIELD.PLAT_H + 0.55, sz * (half - 0.3));
     }
-    // 停车区间标（两端各一块）：对应 StopZone 的 s0 / s1 = 站中心 ∓ PL/2，
-    // 即「两端车门都夹在 [s0,s1] 内才允许开门」的判定边界（core.evaluateStop）。
+
+    // ---- 无站台柱雨棚：柱网 24m，柱立股道间（x=px±CANOPY_HALF > w/2，站台面无柱）----
+    const eave = FIELD.CANOPY_EAVE, roof = FIELD.CANOPY_ROOF, halfCan = FIELD.CANOPY_HALF;
+    const zs = [];
+    for (let z = -half + 6; z <= half - 6 + 0.1; z += FIELD.COL_SPAN) zs.push(z);
+    for (const z of zs) {
+      for (const s of [-1, 1]) {
+        post(c, 0x8b9298, px + s * halfCan, eave / 2, z, 0.30, eave, 0.30);
+      }
+      // 横向三角桁架：上弦横杆 + 2 斜撑（细杆，非整块板）
+      fBox(c, 'metal', 0xb6bec4, 2 * halfCan, 0.16, 0.18, px, eave, z);
+      fBeam(c, 'metal', 0x9aa2a8, px - halfCan, eave - FIELD.CANOPY_RISE, z, px, eave, z, 0.12);
+      fBeam(c, 'metal', 0x9aa2a8, px + halfCan, eave - FIELD.CANOPY_RISE, z, px, eave, z, 0.12);
+    }
+    // 纵向主弦 + 檐口（细杆，opaque；横向三角桁架见上方 zs 循环）。
+    // 屋面改为「覆盖全场的连片大跨 opaque 板」，在站台循环之后统一生成（见下），
+    // 这里不再为每座站台铺独立小棚 / 半透明板，避免 X 光片式多层半透明叠加。
     for (const s of [-1, 1]) {
-      box(c, 0xffd23f, w * 0.9, 0.03, 0.5, px, PH + 0.02, s * (half - 0.3));
-      box(c, 0x3a3f45, 0.18, 1.1, 0.18, px, PH + 0.55, s * (half - 0.3));
+      fBox(c, 'metal', 0x9aa2a8, 0.18, 0.18, PL * 0.97, px + s * halfCan, eave - FIELD.CANOPY_RISE, 0);
+      fBox(c, 'metal', 0xc7ced3, 0.22, 0.22, PL * 0.97, px + s * halfCan, eave - 0.22, 0);  // 檐口包边
+    }
+
+    // ---- 站台细节 ----
+    // 灯柱（每 ~72m 一根，柱走 posts 实例、灯头合并进 metal）
+    for (let k = 0; k < 6; k += 1) {
+      const z = -half + 30 + k * (PL - 60) / 5;
+      post(c, 0x6c737a, px, (FIELD.PLAT_H + 5.0) / 2, z, 0.18, 5.0 - FIELD.PLAT_H, 0.18);
+      fBox(c, 'metal', 0xdfe6ea, 0.9, 0.14, 0.28, px, 5.0, z);
+    }
+    // 座椅（4 组：座板 + 靠背）、垃圾桶（2 个）
+    for (let k = 0; k < 4; k += 1) {
+      const z = -half + 60 + k * (PL - 120) / 3;
+      fBox(c, 'main', 0x8a5a3a, 2.6, 0.12, 0.5, px, FIELD.PLAT_H + 0.45, z);
+      fBox(c, 'main', 0x8a5a3a, 2.6, 0.5, 0.1, px, FIELD.PLAT_H + 0.72, z - 0.2);
+    }
+    for (const sz of [-1, 1]) {
+      fBox(c, 'metal', 0x4a5560, 0.5, 0.8, 0.5, px, FIELD.PLAT_H + 0.4, sz * half * 0.5);
+    }
+    // 车厢号彩色地标（地面躺平 Plane，每边 6 处，4 色循环=蓝/黄/绿/紫）
+    const carRegs = [SIG_REG.carBlue, SIG_REG.carYellow, SIG_REG.carGreen, SIG_REG.carPurple];
+    for (let k = 0; k < 6; k += 1) {
+      const z = -half + 40 + k * (PL - 80) / 5;
+      const reg = carRegs[k % carRegs.length];
+      for (const s of [-1, 1]) {
+        fSign(c, reg, px + s * (w / 2 - 1.7), FIELD.PLAT_H + 0.03, z, 1.5, 1.5,
+          -Math.PI / 2, 0, [0]);
+      }
+    }
+    // 站台 LED 引导屏（悬挂，面朝 ±X 便于 +X 机位读到）+ 吊杆
+    for (const sz of [-1, 1]) {
+      const z = sz * PL * 0.3;
+      fSign(c, SIG_REG.led, px, 3.7, z, 3.4, 1.1, 0, 0, [Math.PI / 2, -Math.PI / 2]);
+      for (const dx of [-1.4, 1.4]) {
+        fBox(c, 'metal', 0x5a626a, 0.06, 2.5, 0.06, px + dx, 5.0, z);
+      }
+    }
+    // 站台编号吊牌（悬挂，面朝 ±X）
+    for (const sz of [-1, 1]) {
+      fSign(c, SIG_REG.platform(platNum), px, 3.8, sz * half * 0.42, 1.6, 1.0,
+        0, 0, [Math.PI / 2, -Math.PI / 2]);
+    }
+    // 安全提示牌（站台端部，面朝 ±Z）
+    fSign(c, SIG_REG.safety, px, 2.6, -half + 2, 1.6, 0.9, 0, 0, [0, Math.PI]);
+    void kind;
+  }
+
+  // ---- 覆盖全场的「无站台柱大跨雨棚」屋面（连片 opaque 金属板 + 中央通道透空）----
+  // 资料：哈西 83068㎡ 无站台柱雨棚覆盖全场、横轨向一跨跨多个站台；股道上方
+  // 4m 透空不封顶（北京站无柱雨棚）。这里左右各连成一整片 opaque 屋面（不再
+  // 每站台一条独立小棚），中央正线通道上方留空 + 一条窄半透明采光带，使列车在
+  // x≈0 始终可见，同时雨棚 / 站房一眼是实体建筑而非玻璃骨架。
+  const roofTop = FIELD.CANOPY_ROOF;
+  const innerL = clearX0 - 0.6, innerR = clearX1 + 0.6;   // 连片屋面内缘（让出中央通道）
+  const outer = span / 2 + 1.2;                            // 屋面外缘（略挑出站场）
+  const panels = [[-outer, innerL], [innerR, outer]];
+  for (const [x0, x1] of panels) {
+    const bw = Math.max(0.5, x1 - x0);
+    fBox(c, 'metal', 0x9aa3ab, bw, 0.06, PL * 0.97, (x0 + x1) / 2, roofTop, 0);  // opaque 金属屋面板
+  }
+  // 全场唯一一条半透明窄采光带（透明面 1 块；列车正上方透视用）
+  const skyW = Math.min(2 * FIELD.SKYLIGHT_W, innerR - innerL - 1);
+  fBox(c, 'glass', 0x9fd0e6, Math.max(1, skyW), 0.04, PL * 0.97, 0, roofTop + 0.02, 0);
+  // 全场横向檩条/板缝（每 COL_SPAN 一道、跨两片；替代原每站台 19 根×10 → 省面）
+  const seams = [];
+  for (let z = -half + 6; z <= half - 6 + 0.1; z += FIELD.COL_SPAN) seams.push(z);
+  for (const z of seams) {
+    for (const [x0, x1] of panels) {
+      fBox(c, 'metal', 0x879097, Math.max(0.5, x1 - x0), 0.06, 0.1, (x0 + x1) / 2, roofTop + 0.05, z);
+    }
+  }
+  // 全场纵向檩条（每片 2 根，沿 Z 连续细杆）
+  for (const [x0, x1] of panels) {
+    for (const t of [0.33, 0.67]) {
+      fBox(c, 'metal', 0xa8b0b6, 0.12, 0.12, PL * 0.97, x0 + (x1 - x0) * t, roofTop - 0.24, 0);
     }
   }
 
-  // ---- 进出站道岔：按 layout.switches 的本地相对几何摆示意岔尖 ----
-  // sw.s 是站中心为 0 的相对米，这里直接当局部 z 用；运行时绝对里程道岔由
-  // alignment.switchPoints(lane) 生成，本数组只供站场摆岔尖 / HUD 报进路编号。
-  for (const sw of (layout.switches || [])) {
-    const sgn = Math.sign(sw.lateral) || 1;
-    const x0 = sw.kind === 'entry' ? 0 : sgn * Math.abs(sw.lateral);
-    const len = Number(sw.length) || 69;                 // 18 号道岔全长（核实）
-    box(c, 0x6e747a, 0.10, 0.12, len, x0 + sgn * 1.2, -0.06, sw.s, 0, sgn * 0.06, 0);
-    box(c, 0x3a3f45, 0.7, 0.12, 0.7, x0, -0.05, sw.s - len / 2);
+  // ---- 跨线高架候车室：棕红陶板实体墙 + 拱形 + 冰花天窗 + 站名牌 + 进站口 ----
+  // 楼面 y=8（列车顶 4.05 上方约 4m 净空），列车可从下方股道穿过；站房在站场中部
+  // z≈0，位于列车前方（集成层把站场中心摆到列车前方 200m），不遮挡车头。
+  const hallW = Math.max(28, Math.min(112, span * 0.55));
+  const hd = FIELD.HALL_DEPTH;
+  const hb = FIELD.HALL_BASE, hh = FIELD.HALL_H, top = hb + hh;
+  // 楼面 + 边梁
+  fBox(c, 'main', 0xb9b3a4, hallW + 2, 0.5, hd, 0, hb, 0);
+  for (const s of [-1, 1]) {
+    fBox(c, 'metal', 0x8a9298, hallW + 2, 0.7, 0.5, 0, hb - 0.1, s * hd / 2);
   }
+  // 落地支柱（落在股道间，跳过 |x|<9.75 的中央正线通道，不压正线）
+  for (const fx of [-0.42, -0.28, 0.28, 0.42]) {
+    for (const sz of [-1, 1]) {
+      const x = fx * hallW;
+      if (Math.abs(x) < 10) continue;
+      fBox(c, 'main', 0xa7a294, 0.9, hb - FIELD.PLAT_H, 0.9, x, (hb + FIELD.PLAT_H) / 2, sz * (hd / 2 - 2));
+    }
+  }
+  // 四面实体墙：棕红色陶板（哈西外立面陶土板 / 取色圣索菲亚），opaque，一眼是实体建筑
+  const TILE = 0x9c4a30, TILE_DARK = 0x7d3a26;
+  for (const s of [-1, 1]) {
+    fBox(c, 'main', TILE, hallW, hh, 0.24, 0, hb + 0.25 + hh / 2, s * hd / 2);
+    fBox(c, 'main', TILE_DARK, 0.24, hh, hd, s * hallW / 2, hb + 0.25 + hh / 2, 0);
+  }
+  // 水平窗带（前后各一条 = 2 块小面积半透明，进 glass 组）
+  for (const s of [-1, 1]) {
+    fBox(c, 'glass', 0x8fb4c8, hallW - 2, 1.0, 0.06, 0, hb + 0.25 + hh * 0.68, s * (hd / 2 + 0.14));
+  }
+  // 幕墙金属竖框（每 8m 一根）+ 顶部檐口梁
+  for (let x = -hallW / 2; x <= hallW / 2 + 0.1; x += 8) {
+    for (const s of [-1, 1]) {
+      fBox(c, 'metal', 0xcfd6da, 0.16, hh, 0.16, x, hb + 0.25 + hh / 2, s * hd / 2);
+    }
+  }
+  for (const s of [-1, 1]) {
+    fBox(c, 'metal', 0xd7dee2, hallW + 2, 0.5, 0.5, 0, top + 0.25, s * hd / 2);
+    fBox(c, 'metal', 0xd7dee2, 0.5, 0.5, hd, s * hallW / 2, top + 0.25, 0);
+  }
+  // 屋顶：opaque 金属屋面 + 中央「冰花」采光天窗（1 块小面积半透明）+ 横向屋架梁
+  const roofY = top + 0.5;
+  fBox(c, 'metal', 0x8a9298, hallW + 2, 0.08, hd, 0, roofY, 0);
+  const skyHall = Math.min(10, hallW * 0.2);
+  const skyD = Math.min(12, hd * 0.55);
+  fBox(c, 'glass', 0x9fd0e6, skyHall, 0.05, skyD, 0, roofY + 0.05, 0);
+  // 冰花形天窗金属分格（十字细杆，示意）
+  fBox(c, 'metal', 0xcfd6da, 0.12, 0.06, skyD, 0, roofY + 0.08, 0);
+  fBox(c, 'metal', 0xcfd6da, skyHall, 0.06, 0.12, 0, roofY + 0.08, 0);
+  for (let z = -hd / 2; z <= hd / 2 + 0.1; z += 8) {
+    fBox(c, 'metal', 0x9aa2a8, hallW + 2, 0.12, 0.14, 0, roofY + 0.1, z);
+  }
+
+  // 进站口（+Z 正立面中央，朝列车来向）：门洞 + 玻璃门 + 门框 + 雨搭 + 进站口牌
+  const ez = hd / 2 + 0.15;
+  fBox(c, 'main', 0x20262c, 6.4, 3.0, 0.2, 0, hb + 1.5, ez);            // 门洞凹口
+  fBox(c, 'main', 0x2a3a4a, 6.0, 2.9, 0.08, 0, hb + 1.5, ez + 0.12);  // 深色玻璃门（opaque）
+  for (const sx of [-3.2, 3.2]) fBox(c, 'metal', 0xcfd6da, 0.2, 3.2, 0.2, sx, hb + 1.6, ez + 0.16);
+  fBox(c, 'metal', 0xcfd6da, 6.6, 0.2, 0.2, 0, hb + 3.2, ez + 0.16);
+  fBox(c, 'metal', 0x8a9298, 10, 0.18, 3.2, 0, hb + 3.6, ez + 1.7);     // 进站雨搭
+  // 拱形门廊（几根斜梁搭出拱券轮廓，opaque 细杆，示意哈西拱形元素）
+  for (const s of [-1, 1]) {
+    fBeam(c, 'metal', 0xb08a5a, s * 5.2, hb + 3.2, ez + 0.2, s * 3.4, hb + 4.6, ez + 0.2, 0.3);
+  }
+  fBox(c, 'metal', 0xb08a5a, 7.0, 0.3, 0.4, 0, hb + 4.6, ez + 0.2);
+  fSign(c, SIG_REG.entrance, 0, hb + 4.15, ez + 0.3, 4.0, 1.0, 0, 0, [0, Math.PI]);
+  fSign(c, SIG_REG.exit, 0, hb + 4.15, -ez - 0.3, 3.0, 0.9, 0, 0, [0, Math.PI]);
+  fSign(c, SIG_REG.direction, 0, top - 0.4, ez + 0.3, 6.0, 0.9, 0, 0, [0, Math.PI]);
+
+  // ---- 高架候车室 ↔ 站台的连接：楼梯 / 扶梯 / 电梯（一眼看出连接关系）----
+  // 取最靠近中央通道的 2 座站台（左右各一），下端接站台面 1.25、上端接楼面 8。
+  const inner = platCenters.length
+    ? platCenters.reduce((a, b) => (Math.abs(a) < Math.abs(b) ? a : b)) : 0;
+  const connXs = [inner, -inner].filter((v, i, arr) => arr.indexOf(v) === i);
+  for (const cx of connXs) {
+    const z0 = hd / 2 + 6;                    // 楼板前缘外侧，落在站台上
+    // 楼梯：10 级台阶 + 两侧栏板
+    const steps = 10, run = 8, dz = run / steps, dh = (hb - 0.5 - FIELD.PLAT_H) / steps;
+    for (let k = 0; k < steps; k += 1) {
+      fBox(c, 'main', 0xbdb7a8, 2.6, 0.14, dz + 0.05,
+        cx - 2.0, FIELD.PLAT_H + (k + 1) * dh, z0 + k * dz);
+    }
+    for (const s of [-1, 1]) {
+      fBox(c, 'metal', 0x8a9298, 0.1, 0.9, run, cx - 2.0 + s * 1.35, hb - 1.3, z0 + run / 2);
+    }
+    // 扶梯：一根斜梁 + 扶手（从站台面斜升到楼面）
+    fBeam(c, 'metal', 0x9aa2a8, cx + 1.5, FIELD.PLAT_H, z0, cx + 1.5, hb - 0.4, z0 + run, 0.9);
+    fBeam(c, 'metal', 0xcfd6da, cx + 1.5, FIELD.PLAT_H + 1.0, z0, cx + 1.5, hb + 0.6, z0 + run, 0.12);
+    // 电梯井：竖井玻璃 + 顶机房，配电梯标识
+    fBox(c, 'metal', 0x8a9298, 2.2, hb - FIELD.PLAT_H, 2.2, cx + 4.6, (hb + FIELD.PLAT_H) / 2, z0 + 2); // 电梯井 opaque
+    fBox(c, 'main', 0xb9b3a4, 2.6, 0.6, 2.6, cx + 4.6, hb + 0.3, z0 + 2);
+    fSign(c, SIG_REG.lift, cx + 4.6, 2.4, z0 + 0.85, 1.2, 0.8, 0, 0, [0, Math.PI]);
+    fSign(c, SIG_REG.escalator, cx + 1.5, FIELD.PLAT_H + 1.6, z0 - 0.4, 1.4, 0.7, 0, 0, [0, Math.PI]);
+  }
+
+  // ---- 站名牌位置（+X 侧墙，面朝 ±X，hero/side 机位清晰可读）----
+  const signPlacements = [{ x: hallW / 2 + 0.4, y: hb + hh * 0.62, z: 0 }];
+  // ---- 停车区间标位置（贴两侧站台端部，避开 x=0 中央列车通道）----
+  const mp = platCenters.length
+    ? platCenters.reduce((a, b) => (Math.abs(a) < Math.abs(b) ? a : b)) : FIELD.PLAT_W;
+  const markerPlacements = [
+    { x: -Math.abs(mp), y: 2.6, z: -half }, { x: Math.abs(mp), y: 2.6, z: half },
+  ];
+
+  return { half, hallW, signPlacements, markerPlacements };
 }
 
-/** 组装站场几何包：复用 v1 的 assemble，再挂一张共享的「停车区间」标牌几何。 */
-function composeField(layout, quality, opts) {
-  const c = newCollector();
-  buildFieldGeometry(c, layout, quality);
-  const half = (Number(layout.platformLength) || RAIL.platformLength) / 2;
-  const signPlacements = [
-    { x: -3, y: 3.4, z: -half * 0.5 },
-    { x: 3, y: 3.4, z: half * 0.5 },
-  ];
-  signStanchions(c, signPlacements);
-  const pack = assemble(c, opts.signName || layout.name, signPlacements);
+// ------------------------------------------------------------ 组装几何包 ----
+/** 由站场布局推导「相对正线中心 x=0 的真实站台 x 区间」数组 [[x0,x1],...]。
+ *  供 passengers.js 对齐乘客脚底，避免人站进 |x|<3.6 的道床；纯数据、不造几何。
+ *  与 buildFieldGeometry 共用 fieldTrackLayout()，保证几何与乘客带严格同源。 */
+function platformBandsForLayout(layout) {
+  const { tx, has, gaps, PW } = fieldTrackLayout(layout);
+  const bands = [];
+  for (let j = 0; j < gaps; j += 1) {
+    if (!has[j]) continue;
+    const px = (tx[j] + tx[j + 1]) / 2;
+    bands.push([px - PW / 2, px + PW / 2]);
+  }
+  return bands;
+}
 
-  // 停车区间文字标牌：两端各一块。几何按 half 缓存复用（所有 450m 站共用一份），
-  // 贴图按文字缓存（全局 1 张），所以单站场只引用 2 张贴图（≤4 红线）。
+function composeField(layout, quality, opts) {
+  ensure();
+  ensureFieldAssets();
+  const c = newFieldCollector();
+  const ctx = buildFieldGeometry(c, layout, quality);
+  signStanchions(c, ctx.markerPlacements);          // 停车区间标立柱（走 posts 实例）
+
+  // 站名牌（按站名复用 v1 的 signTexture / makeSignGeometry，FrontSide 背对背 plane）
+  const signName = opts.signName || layout.name;
+  const signTex = signTexture(signName);
+  const signMatKey = 'sign:' + signName;
+  if (!CACHE.mats.has(signMatKey)) {
+    CACHE.mats.set(signMatKey, new THREE.MeshBasicMaterial({
+      map: signTex, side: THREE.FrontSide, toneMapped: false,
+    }));
+  }
+  const signGeo = makeSignGeometry(ctx.signPlacements, 6.0, 1.6);
+
+  // 停车区间文字标牌：两端各一块，几何按 half 缓存复用，贴图按文字缓存（全局 1 张）
+  const half = ctx.half;
   const markerGeoKey = `marker:${half}`;
   if (!CACHE.packs.has(markerGeoKey)) {
     CACHE.packs.set(markerGeoKey, makeSignGeometry(
-      [{ x: 0, y: 2.6, z: -half }, { x: 0, y: 2.6, z: half }], 6.4, 1.0));
+      [{ x: -Math.abs(ctx.markerPlacements[0].x), y: 2.6, z: -half },
+        { x: Math.abs(ctx.markerPlacements[1].x), y: 2.6, z: half }], 6.4, 1.0));
   }
-  pack.markerGeo = CACHE.packs.get(markerGeoKey);
-  const label = '停车位置 · 车门区';
-  const matKey = 'label:' + label;
-  if (!CACHE.mats.has(matKey)) {
-    CACHE.mats.set(matKey, new THREE.MeshBasicMaterial({
+  const label = '动车组停车位置';   // 两端蓝底白字「动车组停车位置标」，对标误差 ±20~50cm
+  const labelMatKey = 'label:' + label;
+  if (!CACHE.mats.has(labelMatKey)) {
+    CACHE.mats.set(labelMatKey, new THREE.MeshBasicMaterial({
       map: labelTexture(label), side: THREE.FrontSide, toneMapped: false,
     }));
   }
-  pack.markerMatKey = matKey;
-  return pack;
+
+  // 6 个合并几何 mesh（main/metal/glass/signage/sign/marker）+ posts + sleepers = 8
+  const meshDefs = [
+    { geom: mergeGroup(c.main), matKey: 'field:main', shadow: true },
+    { geom: mergeGroup(c.metal), matKey: 'field:metal', shadow: true },
+    { geom: mergeGroup(c.glass), matKey: 'field:glass', shadow: false },
+    { geom: mergeGroup(c.signage), matKey: 'field:signage', shadow: false },
+    { geom: signGeo, matKey: signMatKey, shadow: false },
+    { geom: CACHE.packs.get(markerGeoKey), matKey: labelMatKey, shadow: false },
+  ];
+
+  // 柱 / 枕木实例数据（沿用 v1 的打包格式）
+  const pm = new Float32Array(c.posts.length * 16);
+  const pc = new Float32Array(c.posts.length * 3);
+  c.posts.forEach((o, i) => {
+    pm.set(o.matrix.elements, i * 16);
+    const col = new THREE.Color(o.color);
+    pc[i * 3] = col.r; pc[i * 3 + 1] = col.g; pc[i * 3 + 2] = col.b;
+  });
+  const sm = new Float32Array(c.sleepers.length * 16);
+  c.sleepers.forEach((m, i) => sm.set(m.elements, i * 16));
+
+  return {
+    meshDefs,
+    pm, pc, postCount: c.posts.length,
+    sm, sleeperCount: c.sleepers.length,
+  };
 }
 
-/** 站场 Group = v1 的 4 个 mesh + 1 个停车区间标 mesh = 5 mesh（≤10 红线）。 */
+/** 站场 Group = 6 个合并 mesh + posts + sleepers = 8 个 mesh（≤10 红线）。 */
 function instantiateField(pack, name, meta) {
-  const g = instantiate(pack, name, meta);
-  const marker = new THREE.Mesh(pack.markerGeo, CACHE.mats.get(pack.markerMatKey));
-  marker.name = 'stop-zone-markers';
-  g.add(marker);
+  const g = new THREE.Group();
+  g.name = name;
+  g.userData = meta;
+  for (const d of pack.meshDefs) {
+    if (!d.geom) continue;
+    const mesh = new THREE.Mesh(d.geom, CACHE.mats.get(d.matKey));
+    if (d.shadow) { mesh.castShadow = true; mesh.receiveShadow = true; }
+    // 半透明（采光带/窗带）明确排到不透明之后渲染，避免与实体屋面/墙排序错乱发灰。
+    if (mesh.material.transparent) mesh.renderOrder = 2;
+    g.add(mesh);
+  }
+  if (pack.postCount) {
+    const im = new THREE.InstancedMesh(CACHE.unit.box, CACHE.mats.get('post'), pack.postCount);
+    im.instanceMatrix.array.set(pack.pm);
+    im.instanceMatrix.needsUpdate = true;
+    im.instanceColor = new THREE.InstancedBufferAttribute(pack.pc.slice(), 3);
+    im.instanceColor.needsUpdate = true;
+    im.castShadow = true;
+    g.add(im);
+  }
+  if (pack.sleeperCount) {
+    const sm = new THREE.InstancedMesh(CACHE.unit.box, CACHE.mats.get('sleeper'), pack.sleeperCount);
+    sm.instanceMatrix.array.set(pack.sm);
+    sm.instanceMatrix.needsUpdate = true;
+    sm.receiveShadow = true;
+    g.add(sm);
+  }
   return g;
 }
 
@@ -1288,6 +1921,19 @@ export function createStationSystem(ctx, opts = {}) {
   ensure();
   const layouts = opts.layouts ?? STATION_LAYOUTS;
   const depotLayouts = opts.depotLayouts ?? DEPOT_LAYOUTS;
+
+  // 站台真实 x 区间：按 id 预计算所有站（相对正线中心 x=0），注入 ctx 供
+  // passengers.js 对齐乘客站位；由 fieldTrackLayout 同源推导，不写死股道索引。
+  const bandsByStation = {};
+  for (const [sid, ly] of Object.entries(layouts)) {
+    if (ly && Number.isFinite(ly.trackCount)) {
+      try { bandsByStation[sid] = platformBandsForLayout(ly); } catch { /* 忽略异常布局 */ }
+    }
+  }
+  if (ctx && typeof ctx === 'object') {
+    ctx.platformBandsByStation = bandsByStation;
+    ctx.platformBands = bandsByStation.VAB || Object.values(bandsByStation)[0] || [];
+  }
 
   const group = new THREE.Group();
   group.name = 'station-system-overlay';
@@ -1347,6 +1993,7 @@ export function createStationSystem(ctx, opts = {}) {
     lastEvent: null,
     layoutCount: Object.keys(layouts).length,
     depotLayoutCount: Object.keys(depotLayouts).length,
+    platformBands: (ctx && ctx.platformBands) || [],   // 当前可见站站台 x 区间（供 HUD / 客流）
   };
 
   function paintLamps() {
@@ -1374,11 +2021,13 @@ export function createStationSystem(ctx, opts = {}) {
     state,
     group,
     resolve: (sid) => layoutFor(sid, 'auto'),   // HUD 查站场 / 段布局用
+    platformBandsFor: (sid) => bandsByStation[sid] || [],  // 按站查真实站台 x 区间
     init(c) { if (c?.scene && !group.parent) c.scene.add(group); },
     update(c) {
       if (!c) return;
       // 每帧把运行时状态同步进 sys.state，HUD 直接读这一份，不必翻 ctx。
       state.doorsCanOpen = Boolean(c.doorsCanOpen);
+      if (c.platformBands) state.platformBands = c.platformBands;
       state.zone = c.stopZone ?? state.zone;
       if (c.doorState?.state) state.doorState = c.doorState.state;
       if (c.station) state.station = c.station;
@@ -1406,6 +2055,35 @@ export function createStationSystem(ctx, opts = {}) {
             state.station = { id: payload.zone.stationId, name: payload.zone.name };
             const ti = payload.zone.trackIndex;
             if (ti != null && !state.occupiedTracks.includes(ti)) state.occupiedTracks.push(ti);
+            // 站台 x 区间注入（供 passengers.js 对齐脚底，杜绝踩空/悬空）：
+            // 优先透传集成层 / 框架在 zone 上算好的「当前停靠到发线真实带」（lane
+            // 横移后的精确值）；没有则用 fieldTrackLayout 同源推导的整站全带宽
+            // （每条位置都准确，落任一带均安全）。
+            // 注意：zone.platformIndex 是按 trackIndex 均匀分摊的逻辑序号
+            // (station-layouts.js)，与 bands 的几何顺序不同口径，绝不拿它硬挑单带，
+            // 避免给乘客错误站位——宁可给整站全带宽让 resolveBands 自己钳制。
+            // 每次到站先把所有站的 ByStation 条目恢复为同源静态全宽，消除上一次
+            // 到站（可能带 lane 透传单带）遗留的动态值，避免跨站在 ARRIVE 之前
+            // 的阶段读到残留单带。ARRIVE 不频繁，遍历重算开销可忽略。
+            for (const sid of Object.keys(bandsByStation)) {
+              try { bandsByStation[sid] = platformBandsForLayout(layouts[sid]); }
+              catch { /* 异常布局保留原值 */ }
+            }
+            const z = payload.zone;
+            const zBand = Array.isArray(z.platformBand) ? z.platformBand
+              : (Number.isFinite(z.platformX0) && Number.isFinite(z.platformX1)
+                ? [z.platformX0, z.platformX1] : null);
+            // 框架若在 zone 上算好了「lane 横移后、已换算到列车坐标系」的精确单带
+            // 就优先用；否则用刚恢复的静态全宽。
+            const bands = zBand ? [zBand] : bandsByStation[z.stationId];
+            if (bands) {
+              // 动态带同步覆盖「当前站」条目，使 ctx.platformBands /
+              // platformBandsByStation / state.platformBands 三条注入路径恒一致
+              // （客流侧 resolveBands 任一优先级读到都是同一份值）。
+              bandsByStation[z.stationId] = bands;
+              state.platformBands = bands;
+              if (ctx && typeof ctx === 'object') ctx.platformBands = bands;
+            }
           }
           state.arriveCount += 1;
           state.lastEvent = EVENT.ARRIVE;

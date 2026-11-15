@@ -27,15 +27,31 @@ import { CHUNK } from './config.js';
  * 窗口块去重：站区触发半径 1200 m 会让连续 5~6 块都标成同一座站，
  * 同一标识只挑「离列车最近」的那一块实例化实体，避免复制 5 座哈尔滨站。
  */
-export function assignPrimary(chunks, s) {
+export function assignPrimary(chunks, s, hints = null) {
   const key = (c) => c.stationId || c.depot || (c.landmarkIds || []).join(',') || `k${c.id}`;
+  const centerM = (c) => c.km * 1000 + CHUNK.length / 2;
   const best = new Map();
   for (const c of chunks) {
     if (c.kind !== 'hub' && c.kind !== 'depot' && c.kind !== 'landmark') continue;
-    const centerM = c.km * 1000 + CHUNK.length / 2;
-    const d = Math.abs(centerM - s);
+    const d = Math.abs(centerM(c) - s);
     const k = key(c);
     if (!best.has(k) || d < best.get(k).d) best.set(k, { id: c.id, d });
+  }
+  // 滞回：站房/车辆段/地标只在「离列车最近」的一块里实例化。窗口滚动时最优块
+  // 会在相邻两块之间来回跳，整座站房就会一帧消失、下一帧在别处重建 —— 这是
+  // 跑车时画面「一闪」的主要来源。只要上次选中的块仍在窗口内、且没比最优块
+  // 远出 120 m，就保持不变；等真的驶远了再一次性切换。
+  if (hints) {
+    for (const [k, v] of best) {
+      const prev = hints.get(k);
+      if (!prev) continue;
+      const still = chunks.find((c) => c.id === prev.id);
+      if (!still) continue;
+      const prevD = Math.abs(centerM(still) - s);
+      if (prevD - v.d < 120) best.set(k, { id: prev.id, d: prevD });
+    }
+    hints.clear();
+    for (const [k, v] of best) hints.set(k, { id: v.id });
   }
   return chunks.map((c) => ({
     ...c,
@@ -172,15 +188,22 @@ export function createJourneyRuntime(packDef, host = {}) {
     s: (host.startKm ?? route0.nodes?.[0]?.km ?? 0) * 1000,
     dir: DIRECTION.FORWARD,
     velocity: 0,
-    running: false,
-    targetKmh: host.kmh ?? 120,
-    accel: host.accel ?? 18,
-    decel: 26,
+    stopped: true,              // 初始停车态，供开门门控与 HUD 使用
+    running: false,             // 牵引指令（惰行时仍为 false，但车不会瞬停）
+    throttle: 1,                // 牵引级位 0..1
+    brake: 0,                   // 制动级位 0..1，玩家独立控制
+    emergency: false,           // 紧急制动
+    targetKmh: host.kmh ?? 120, // 司机速度手柄
+    accel: host.accel ?? 4.0,   // 可玩量级，滑杆可降到 0.2 的真实量级
+    decel: host.decel ?? 3.0,
+    atpLimitKmh: 300,           // ATP / 线路限速监督
+    stopErrorM: null,           // 对标停车误差（米）
+    dsdTimer: 0,                // 司机警惕装置计时
     lane: LANE.MAIN,
     switchState: LANE.MAIN,
     doorState: { state: DOOR_STATE.CLOSED, timer: 0, dwell: 0 },
     doorsCanOpen: false,
-    doorRequest: null,       // null = 自动；true/false = 手动请求
+    doorRequest: null,       // 手动模式 null = 未请求；ATO 模式 null = 跟随策略
     doorLatch: false,        // 本次停站乘降已结束，出站前不再自动开门
     stopZone: null,
     station: null,
@@ -190,10 +213,13 @@ export function createJourneyRuntime(packDef, host = {}) {
     quality: host.quality ?? 'mid',
     view: host.view ?? 'hero',
     cameraMode: 'relative',
-    autoDwell: true,
-    autoDepart: true,
+    // 默认 **完全手动**：不自动停站、不自动开关门、不自动发车。
+    // 想看演示可开 ATO（autoDrive），才启用时刻表接管的自动停站/乘降/发车。
+    autoDwell: false,
+    autoDepart: false,
+    autoDrive: false,
     time: 0,
-    simMinutes: 6 * 60,      // 时刻表用的仿真时钟（分钟）
+    simMinutes: 8 * 60,      // 仿真时钟从早高峰 8:00 起，站台客流才有真实量级
     ahead: host.ahead ?? CHUNK.ahead,
     behind: CHUNK.behind,
     density: host.density ?? 0.75,
@@ -217,6 +243,7 @@ export function createJourneyRuntime(packDef, host = {}) {
   let lastDoor = DOOR_STATE.CLOSED;
   let lastZoneId = null;
   let lastApproach = null;
+  const primaryHints = new Map();   // assignPrimary 的滞回记忆，杜绝站房反复重建
 
   const ctx = {
     pack, bus, registry, state, host,
@@ -325,7 +352,48 @@ export function createJourneyRuntime(packDef, host = {}) {
     state.velocity = 0;
     registry.get('chunks')?.clear?.();
   }
-  function setRunning(on) { state.running = Boolean(on); }
+  /** 牵引开关。关掉只是松牵引（惰行），不代替制动 —— 停车要玩家给制动级位。 */
+  function setRunning(on) {
+    state.running = Boolean(on);
+    if (on) { state.brake = 0; state.emergency = false; state.dsdTimer = 0; }
+  }
+  /** 牵引级位 0..1；给油即自动松闸并接管。 */
+  function setThrottle(v) {
+    state.throttle = clamp(Number(v) || 0, 0, 1);
+    if (state.throttle > 0) {
+      state.running = true; state.brake = 0; state.emergency = false;
+    }
+    state.dsdTimer = 0;
+    return state.throttle;
+  }
+  /** 制动级位 0..1；给闸即断牵引。 */
+  function setBrake(v) {
+    state.brake = clamp(Number(v) || 0, 0, 1);
+    if (state.brake > 0) state.running = false;
+    state.dsdTimer = 0;
+    return state.brake;
+  }
+  function setEmergency(on) {
+    state.emergency = Boolean(on);
+    if (state.emergency) state.running = false;
+    state.dsdTimer = 0;
+    return state.emergency;
+  }
+  function setTargetKmh(v) {
+    state.targetKmh = clamp(Number(v) || 0, 0, 300);
+    state.dsdTimer = 0;
+    return state.targetKmh;
+  }
+  /** ATO 自动驾驶总开关：关 = 纯手动，开 = 自动对标停车 + 自动乘降 + 自动发车。 */
+  function setAutoDrive(on) {
+    state.autoDrive = Boolean(on);
+    state.autoDwell = state.autoDrive;
+    state.autoDepart = state.autoDrive;
+    if (!state.autoDrive) state.doorRequest = null;
+    state.dsdTimer = 0;
+    bus.emit('drive:ato', { on: state.autoDrive });
+    return state.autoDrive;
+  }
   function setView(id) { state.view = id; bus.emit('camera:view', id); }
   function setCameraMode(mode) { state.cameraMode = mode; bus.emit(EVENT.CAMERA_MODE, mode); }
   function setTheme(id) {
@@ -345,30 +413,63 @@ export function createJourneyRuntime(packDef, host = {}) {
   function setAutoDepart(on) { state.autoDepart = Boolean(on); }
 
   function update(dt) {
-    const d = clamp(dt, 0, 0.05);
+    // 与宿主 (journey.js) 的上限一致：掉帧时不要把仿真时间吞掉，否则牵引、
+    // 制动、世界滚动都会「变慢一顿」。0.2 s 下 83 m/s 也只推进 16.7 m，
+    // 远小于 450 m 停车区间，不会一帧跨站。
+    const d = clamp(dt, 0, 0.2);
     state._dt = d;
     state.time += d;
     state.simMinutes += d / 60;
 
-    // ---- 运动 ----
-    const target = state.running ? Math.min(300, state.targetKmh) / 3.6 : 0;
-    if (state.velocity < target) state.velocity = Math.min(state.velocity + state.accel * d, target);
-    else state.velocity = Math.max(state.velocity - state.decel * d, target);
+    // ---- 运动：牵引 / 制动 / 惰行三段连续积分 ----
+    // 绝不把 velocity 直接置 0（旧版一进停车区间就 state.velocity=0，造成
+    // 「到站立刻停死」+ 画面突跳）。所有速度变化都走加速度对 dt 积分，
+    // 松牵引只惰行、要停车必须玩家给制动级位，这才是可操作的驾驶。
+    const lineLimit = Number(alignment.speedLimitAt?.(state.s));
+    const atp = clamp(Number.isFinite(lineLimit) && lineLimit > 0 ? lineLimit : 300, 30, 300);
+    state.atpLimitKmh = atp;
+    const targetV = state.running ? Math.min(state.targetKmh, atp) / 3.6 : 0;
+    const drag = 0.035 + state.velocity * 0.0016;     // 基本阻力（示意量级）
+    if (state.brake > 0 || state.emergency) {
+      const dec = state.emergency ? 4.5 : state.decel * state.brake;
+      state.velocity = Math.max(0, state.velocity - (dec + drag) * d);
+    } else if (state.running && state.throttle > 0) {
+      const a = state.accel * state.throttle;
+      if (state.velocity < targetV - 0.01) {
+        state.velocity = Math.min(targetV, state.velocity + a * d);
+      } else if (state.velocity > targetV + 0.01) {
+        state.velocity = Math.max(targetV, state.velocity - (state.decel * 0.5 + drag) * d);
+      } else {
+        state.velocity = Math.max(0, state.velocity - drag * d);
+      }
+    } else {
+      state.velocity = Math.max(0, state.velocity - drag * d);
+    }
     state.progress += state.velocity * d;
     const rawS = state.startS + state.dir * state.progress;
     const clamped = clamp(rawS, 0, alignment.lengthM);
-    if (clamped !== rawS) { state.velocity = 0; state.running = false; }
+    if (clamped !== rawS) {
+      // 到线路端点：同样连续减速到零，不瞬间闪停
+      state.velocity = Math.max(0, state.velocity - state.decel * 2 * d);
+      state.running = false;
+    }
     state.s = clamped;
+    // 司机警惕装置（DSD）：运行中 30 s 无操作只提示，不强行接管（现实是报警+紧急制动）
+    state.dsdTimer = state.velocity > 0.3 ? state.dsdTimer + d : 0;
 
     // ---- 分块窗口：反向时前后互换 ----
     const ahead = state.dir === DIRECTION.FORWARD ? state.ahead : state.behind;
     const behind = state.dir === DIRECTION.FORWARD ? state.behind : state.ahead;
     ctx.chunkWindow.ahead = ahead;
     ctx.chunkWindow.behind = behind;
-    chunks = assignPrimary(visibleChunks(route, state.s, ahead, behind), state.s);
+    chunks = assignPrimary(visibleChunks(route, state.s, ahead, behind), state.s, primaryHints);
 
     // ---- 停车区间 / 车门 ----
     zones = zonesNear(route, state.s, pack.stationLayouts);
+    // 注意：站台带的「站场局部坐标 → 列车坐标系」换算由 stations.js 在 ARRIVE 时
+    // 完成（platformBandsFor / ctx.platformBands 已是列车系，实测 VAB lane=STATION
+    // 时给 [1.75,13.75]）。这里**不能**再减一次 laneOffset，否则双重换算会把带推到
+    // 负区间、乘客直接站到轨道上（本轮踩过的坑）。
     const zone = zones[0] ?? null;
     const ev = train ? evaluateStop(train, zone, state.s, state.dir) : { ok: false, inside: false, doorMileages: [], frontMargin: 0, rearMargin: 0 };
     state.stopZone = zone;
@@ -382,18 +483,32 @@ export function createJourneyRuntime(packDef, host = {}) {
     }
     if (zone && lastApproach && Math.abs(zone.centerS - state.s) > 3400) lastApproach = null;
 
-    // 进站自动停车（时刻表可通过 autoDwell=false 接管）
-    if (state.autoDwell && ev.inside && !state.doorLatch) {
-      state.running = false;
-      state.velocity = 0;
-      if (lastZoneId !== zone.id) {
-        lastZoneId = zone.id;
-        state.doorLatch = false;
-        bus.emit(EVENT.ARRIVE, { zone, s: state.s, train });
+    // ---- 停站：默认完全交给玩家 ----
+    // 只把「已进停车区间 / 对标误差」摆进 state 供 HUD 提示，绝不改 running /
+    // velocity / doorRequest。旧版一进区间就 velocity=0 强制停车，是「到站就
+    // 立马停住、玩家开不动车」的根因。只有打开 ATO 才按制动曲线自动对标停车。
+    const stopped = state.velocity < 0.28;
+    state.stopErrorM = zone && ev.inside ? +(state.s - zone.centerS).toFixed(2) : null;
+    state.stopped = stopped;
+    if (state.autoDrive && zone && ev.inside && !state.doorLatch) {
+      if (!stopped) {
+        state.brake = Math.max(state.brake, 0.55);   // 连续制动，不瞬时归零
+      } else {
+        state.brake = 0;
+        state.running = false;
+        if (lastZoneId !== zone.id) {
+          lastZoneId = zone.id;
+          bus.emit(EVENT.ARRIVE, { zone, s: state.s, train, stopErrorM: state.stopErrorM });
+        }
       }
     }
+    // 手动驾驶时，玩家自己停稳也该发 ARRIVE：客流系统是靠 ARRIVE 生成站台乘客的，
+    // 只在 ATO 分支里发会导致「手动停车开门、站台一个人都没有」。
+    if (!state.autoDrive && zone && ev.inside && stopped && lastZoneId !== zone.id) {
+      lastZoneId = zone.id;
+      bus.emit(EVENT.ARRIVE, { zone, s: state.s, train, stopErrorM: state.stopErrorM });
+    }
     if (!ev.inside) {
-      // 驶离停车区间：清掉「本区间已服务完」的闩锁，下站才能再自动开门
       state.doorLatch = false;
       if (lastZoneId) {
         bus.emit(EVENT.DEPART, { zoneId: lastZoneId, s: state.s });
@@ -401,10 +516,13 @@ export function createJourneyRuntime(packDef, host = {}) {
       }
     }
 
-    const autoReq = state.autoDwell && ev.inside && !state.doorLatch;
+    // 手动模式：doorRequest=null 不再等于「自动开门」，必须玩家主动请求；
+    // 且未停稳一律禁止开门（现实：停稳后司机才启用门控）。
+    const autoReq = state.autoDrive && ev.inside && stopped && !state.doorLatch;
     const request = state.doorRequest === null ? autoReq : state.doorRequest;
     state.doorState = nextDoorState(state.doorState, {
-      canOpen: state.doorsCanOpen, request, dt: d, dwellSec: zone?.dwellSec ?? 30,
+      canOpen: state.doorsCanOpen, request: stopped ? request : false,
+      dt: d, dwellSec: zone?.dwellSec ?? 30,
     });
     if (state.doorState.state !== lastDoor) {
       // 关门流程走完 = 本次乘降作业结束，上闩锁，避免列车还没出站就反复自动开门
@@ -418,8 +536,9 @@ export function createJourneyRuntime(packDef, host = {}) {
         bus.emit(EVENT.BOARD, { zone, train, s: state.s });
       }
     }
-    if (state.autoDepart && state.doorLatch && !state.running && ev.inside) {
+    if (state.autoDrive && state.autoDepart && state.doorLatch && !state.running && ev.inside) {
       state.running = true;
+      state.brake = 0;
       bus.emit(EVENT.DEPART, { zoneId: zone?.id, s: state.s, auto: true });
       lastZoneId = null;
     }
@@ -439,6 +558,7 @@ export function createJourneyRuntime(packDef, host = {}) {
     setRoute, setTravel, setRunning, setDirection, reverse, setLane,
     setTrainSpec, setModel, setFormation, setView, setCameraMode,
     setTheme, setAhead, setDoorRequest, setAutoDwell, setAutoDepart,
+    setThrottle, setBrake, setEmergency, setTargetKmh, setAutoDrive,
     get alignment() { return alignment; },
     get route() { return route; },
     get chunks() { return chunks; },

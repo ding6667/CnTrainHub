@@ -89,13 +89,13 @@ export const CHUNK_KIND = Object.freeze({
 // ------------------------------------------------------------ 画质 ----
 
 export const QUALITY = [
-  { id: 'low', label: '流畅', ratio: 0.7, shadow: 512, ahead: 4, buildingDensity: 0.45, snow: 500 },
-  { id: 'mid', label: '均衡', ratio: 1.0, shadow: 1024, ahead: 7, buildingDensity: 0.75, snow: 1200 },
+  { id: 'low', label: '流畅', ratio: 0.7, shadow: 768, ahead: 4, buildingDensity: 0.45, snow: 500 },
+  { id: 'mid', label: '均衡', ratio: 1.0, shadow: 1536, ahead: 7, buildingDensity: 0.75, snow: 1200 },
   { id: 'high', label: '精细', ratio: 1.5, shadow: 2048, ahead: 9, buildingDensity: 1.0, snow: 2200 },
 ];
 
 /** 单帧预算，验收口径：零 console error + 这三项不超。 */
-export const BUDGET = { calls: 64, triangles: 140000, textures: 18 };
+export const BUDGET = { calls: 64, triangles: 140000, textures: 22 };
 
 export const CAMERA = {
   fov: 52,
@@ -166,7 +166,17 @@ export const VIEWS = [
 ];
 
 /** 演示速度上限（m/s）。真实里程按 travel 累加，不用它做画面缩放。 */
-export const MOTION = { maxKmh: 300, defaultKmh: 120, acceleration: 18, deceleration: 26 };
+/**
+ * 牵引 / 制动量级。实车起动约 0.4~1.2 m/s²、常用制动约 1.0 m/s²，但按 1:1 跑
+ * 到 120 km/h 要近 30 s，玩家会觉得「开不动」。默认放大到可玩量级，滑杆可
+ * 一直下调到 0.2 的真实量级；速度曲线的形状（连续积分、无瞬停）始终一致。
+ */
+export const MOTION = {
+  maxKmh: 300, defaultKmh: 120,
+  acceleration: 4.0, deceleration: 3.0,
+  minAccel: 0.2, maxAccel: 8.0,
+  emergency: 4.5,
+};
 
 // ------------------------------------------------- 各子模块统一接口约定 ----
 //

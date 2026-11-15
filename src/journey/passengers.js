@@ -594,36 +594,180 @@ export function createFlowModel(opts = {}) {
 }
 
 // ========================================================================
-// 五、可视化 System（THREE.InstancedMesh；只在浏览器侧被 factory 调用）
+// 五、可视化 System（THREE.InstancedMesh；站台乘降状态机 + 步态 + 分部件人形）
 // ========================================================================
 
-const MAX_INSTANCES = 240;   // 实例硬钳位（需求：≤240）
-const VISUAL_SCALE = 0.05;  // 真实量级 → 站台可视人数的示意级压缩系数
-const LUGGAGE_INSTANCES = 96; // 行李网格实例数（只有前 96 个槽位画行李）
-const CLOTHING = [0x3a6ea5, 0xb5533c, 0x4f7d54, 0x8a6ea8, 0xc9963f, 0x4a4f5a, 0x2f7f8f, 0xa8586e];
-const SKIN = 0xe8c39e;
-const LUGGAGE_COLOR = 0x333a44;
+/**
+ * 【改写目标】解决「游客在火车道上跑 / 动画不连贯 / 建模质量极低」：
+ *  1) 乘客绝不进轨道：所有坐标先经 computeBands() 从 ctx / stationLayouts / StopZone /
+ *     RAIL 常量推导「真实站台 x 带」，再对每个人体锚点做硬钳位；任何实例矩阵 |x| ≥ 3.6、
+ *     脚底 y = 站台面高（RAIL.platformHeight 1.25），绝不悬空、绝不踩道床/钢轨。
+ *  2) 动画连贯：完整状态机 waiting→walking→boarding→onboard 与 alighting→walking→leaving，
+ *     用「连续路径(弧长参数化)插值 + 时间/路程驱动的步态 + 朝向平滑旋转 + 缩放/色淡出」，
+ *     没有任何一帧瞬移、闪现或突然 freeAgent。按车厢门聚拢排队、候车不越安全线、不随机乱走；
+ *     先下后上、不同 z 车道 + 错峰，避免上下车互相穿透。
+ *  3) 建模：头 / 躯干 / 双臂 / 双腿 / 行李 分部件 InstancedMesh，身高/体型/肤色/衣着/裤色/
+ *     行李(拉杆箱或背包) 差异，程序化材质零第三方模型/贴图。
+ *
+ * 【联网核实资料 · 第 1 轮：乘降组织 / 地标排队 / 安全线】
+ *  - 澎湃《惊!站台候车学问大,竟然还有人不知道?》 https://www.thepaper.cn/newsDetail_forward_11222652
+ *    站台彩色「车厢号地标」按编组/方向指引，旅客据箭头找对应车厢「站在黄线内安全候车」；
+ *    「列车到站后，先下后上，秩序上车」、依次排队、留意站台与列车间隙。
+ *  - 今日头条《有这些方法可以快速找到车厢》 https://m.toutiao.com/article/7571368211854131758/
+ *    地标颜色(黄/绿/蓝/紫)对应 16 正编/16 反编/8 正编/8 反编；站台安全防护屏显示车厢号；
+ *    「在站台安全线内排队等候，列车停稳后先下后上」。
+ *  - 澎湃《提醒!春节来临,进站上车这些事》 https://m.thepaper.cn/baijiahao_16517190
+ *    「严禁越过安全白线」「在相对应的地标处排队」「严禁在站台上奔跑或玩耍」。
+ *  - 澎湃《站台上的这些安全知识》 https://m.thepaper.cn/baijiahao_19892916
+ *    站台工作人员喇叭提示「请在安全线里面走」；按车厢号在白线内侧排队；开车铃响后停止乘降。
+ *
+ * 【联网核实资料 · 第 2 轮：安全线距离规范 / 客流密度 / 走行速度 / 站台作业人员】
+ *  - 百度百科《站台安全线》 https://baike.baidu.com/item/站台安全线/67513267
+ *    我国站台安全线距站台边缘通常 1 m；高铁站 1.5 m 甚至更宽（伯努利效应）。
+ *  - 澎湃《再次强调:这里绝对不能越界!》(引《铁路技术管理规程》第157条)
+ *    https://m.thepaper.cn/baijiahao_13192985
+ *    高站台边缘距线路中心 1750 mm(=RAIL.platformEdge)、安全标线距站台边缘 1000 mm。
+ *  - 国家铁路局《铁路旅客运输服务质量》标准专家解读
+ *    https://www.nra.gov.cn/xwzx/xwxx/gdxw/202204/t20220405_279303.shtml
+ *    4.2.4.2：距站台边缘不小于 1.0 m 设 0.10 m 宽安全警戒线；1.25 m 高站台宜设屏蔽门。
+ *  - 国家铁路局《工程建设标准 2024 年第 4 批》
+ *    https://source.nra.gov.cn/xxgk/gkml/ztjg/bzgf/jsbz/202408/P020240816403182026793.pdf
+ *    站台邻靠正线、通过速度>80km/h 时安全标线距边缘 1.5 m。
+ *  - 建管家《铁路旅客候乘流线组织与站房设计协同优化规范》 https://m.jiangongdata.com/toutiao/920920.html
+ *    普通候车室人均≥1.1 ㎡/人；人均<0.93 ㎡ 时舒适度显著下降。
+ *  - 温州动车南站送客平台交通组织(学术) https://cn.acad-pub.com/index.php/ETR/article/viewFile/7215/6359
+ *    携行李排队密度取 δ=4 人/㎡。
+ *  - Rail Baltica《Stations and passenger platforms》设计指南
+ *    https://www.railbaltica.org/wp-content/uploads/2025/07/RBDG-MAN-026-0104_StationsAndPassengerPlatforms.pdf
+ *    车门通过流 1 人/秒；走行速度常客 1.40 m/s、生客 1.10 m/s。
+ *  - ACM《Simulation-Based Analysis of Emergency Dispersal of Large Passenger Flows in HSR Hubs》
+ *    https://dlnext.acm.org/doi/10.1145/3829441.3829589
+ *    高峰小时 8000~10000 人、瞬时最大聚集 1182 人（量级校准，非单站台密度）。
+ *  - 中国宁波网《宁海铁路指挥部提醒遵守安全事项》 http://news.cnnb.com.cn/system/2009/09/25/006274273.shtml
+ *    动车组停站 1~2 分钟；按车厢号在车门位置排队等候；离站台边沿 2 m 以外候车(老线口径)。
+ *  - 铁道职培《铁路客运员在站台组织旅客乘降时的关键安全措施》
+ *    https://www.mlzp.cc/forum.php?action=printable&mod=viewthread&tid=16141
+ *    客运员提前上岗、在扶梯口/列车中部「平行于安全线」固定立岗、面向列车目迎目送、
+ *    从列车进入站台至开出站台不擅离；组织先下后上、按车厢号在白线内排队、劝阻奔跑。
+ *
+ * 【据此落到本模块的数值/行为口径】
+ *  ① 安全线：候车锚点距站台边缘 ≥ SAFETY_LINE(1.5 m，正线邻靠>80km/h)，且部件最外缘不越线；
+ *     本模块为保守，连上下车位移也不越 HARD_MIN_X。
+ *  ② 硬红线：任何实例矩阵 |x| ≥ 3.6（任务要求；≈道床半宽 2.6 m + 1.0 m 安全余量），
+ *     脚底 y = 站台面高 1.25（layout.platformHeight 优先，RAIL 兜底），绝不进轨道/道床/悬空。
+ *  ③ 排队：按车厢门 doorZ 聚拢，同门 1~2 列、纵向间距 0.82 m(≈δ=4 人/㎡ 略放宽)，
+ *     候车不越线不随机乱走；a.carIndex 分组近似「彩色地标按车厢号」。
+ *  ④ 先下后上：framework 的 ALIGHT 先于 BOARD；下车者走外侧 z 车道且早出发，上车者走车门
+ *     z 车道且按 ≈1 人/秒错峰，二者不在同一 (x,z) 互相穿透。
+ *  ⑤ 走行速度 1.0~1.3 m/s(据 Rail Baltica 1.1~1.4)，步态相位按「累计路程」驱动，停下即不摆。
+ *  ⑥ 站台作业人员：STAFF 固定立岗(见 spawnStaff)，不随客流移动、面朝列车、进出站全程在岗。
+ *  ⑦ 人数：可视人数 ≤132 实例(示意级压缩)，真实量级仍由 flow 的泊松到达 + 定员硬上限决定，
+ *     不编造单站台精确密度。
+ *
+ * 【联网核实资料 · 第 3 轮（team-lead 补充，2026-11）：安全线三层标线 / 四色地标 / 作业时序】
+ *  - 澎湃《站台候车/地标/安全线》 thepaper.cn/newsDetail_forward_23660758
+ *  - 科普中国《四色地标与停车标》（蓝/黄/紫/绿对应 8/16 正/反编；地标标车厢号与前后方向）
+ *  - 人民铁道 peoplerail《站台乘降组织 / 悬挂电子引导屏 / 客运员立岗》
+ *  - 新华网《站台升降式安全防护栏（仅部分站加装，哈西未核实，默认不做）》
+ *  （以上为 team-lead 转述的检索结论，URL 以其给出的域名/路径为准，未编造精确数字）
+ *  站台面高 1250 mm；三层标线：贴边缘白色安全线、黄色凸起盲道、距边缘 1 m 处宽 0.06 m
+ *  黄色警戒线；四色地标蓝=8 正编 / 黄=16 正编 / 紫=8 反编 / 绿=16 反编；作业时序
+ *  停稳→对标误差(±20~50 cm)→车门开(门灯/蜂鸣)→下车→上车→关门→发车；高铁站台
+ *  不设地铁式全高屏蔽门，站台与车体留 10~20 cm 可见缝隙。
+ *
+ * 【据此追加的行为口径 ⑧~⑫】
+ *  ⑧ 安全线三层标线：候车者一律站在安全带内侧(锚点距站台边缘 ≥1.5 m，含部件/行李也不越线)，
+ *     禁止进入站台边缘 1 m 安全带。
+ *  ⑨ 停稳时序：停稳→对标误差(门位确定性微偏移 ±STOP_ERROR，不做零误差瞬停)→开门
+ *     (BOARD_HOLD 门灯/蜂鸣延迟)→下车流(先走 ALIGHT_LEAD)→上车流(错峰)→关门→发车；
+ *     列车进站/出站/通过时整体后退到线内(S.retreat)，停稳且开门前绝不向车门移动。
+ *  ⑩ 四色地标：按 formation+dir 选色(蓝/黄/紫/绿)，按色块成列排队、每队对准一个车门，
+ *     去掉随机撒点；地标色以队列衣着 instanceColor 轻微着色示意(零新增面/贴图)，
+ *     真实地面色块 / 悬挂电子引导屏属站场几何，本模块不画。
+ *  ⑪ 16 辆重联 8/9 节之间不相通：排队与离站方向按「所在半列」朝两端发散，不生成贯通人流。
+ *  ⑫ 站台禁止奔跑：步速恒定 1.0~1.25 m/s 无奔跑状态；不设全高屏蔽门/升降护栏(默认)，
+ *     站台与车体 10~20 cm 缝隙由车体/站台几何负责，本模块上下车不真的跨越缝隙。
+ *
+ * 【仍是近似 / 示意级，不当精确值】
+ *  - 站台 x 区间三层推导：① 优先读 ctx/layout 注入的真实 platformBand（最精确）；
+ *    ② 否则用 bandsFromLayout() 由 StationLayout 的 platformCount/trackCount/mainTracks/
+ *    platformWidth/platformEdge + RAIL.trackCenters 复现站场 x 排布（不写死股道索引）；
+ *    ③ 连 layout 都没有才按 RAIL 常量退化到「正线两侧 [platformEdge+…, platformEdge+width-0.5]」，
+ *    三层都硬钳 |x|≥3.6。
+ *  - 站场几何由另一 agent 改为「以正线为中心贴合 + 中央正线通道无站台、站台对称分布到两侧」，
+ *    故贴合后最近的站台并不在 ±platformEdge，而是隔着中央通道在更远处（大站可达 ±10 m 以上）；
+ *    bandsFromLayout 正是为对齐这版几何。若站场算法再次调整，建议由宿主注入 ctx.platformBands 覆盖。
+ *  - 【坐标系契约，比注入值本身更关键】乘客 group 直接挂 scene（世界/列车原点坐标系、单位变换），
+ *    站场 field 挂在 chunk group 下、会随 alignment.localMatrixAt(s, s0, {lane}) 整体平移
+ *    Δx=laneOffset；列车固定世界原点、乘客不横移。故注入的 platformBand 必须是「已换算到
+ *    列车/世界坐标系」(含 Δx) 的区间，**不是站场局部(相对正线中心 x=0)坐标**：
+ *      · lane=MAIN：Δx=0，局部坐标 == 世界坐标，当前 [11.5,23.5]→[14,22] 完全正确；
+ *      · lane≠MAIN：局部带在乘客坐标系里整体偏 Δx，注入任何静态局部值都会踩空/悬空。
+ *    因此「列车进到发线贴站台」要成立，须由框架层在组装 StopZone 时把「局部带 + Δx」写进
+ *    zone.platformBand / platformX0,X1（本模块的透传优先分支自动精确对齐，无须再改）。
+ *    Δx 属 alignment.js，本模块与站场层都不复制该数学。默认 lane=MAIN 下对接已正确。
+ *  - 「登车/下车」用朝车门方向的连续位移 + 缩放/色淡出(fade) 示意，不真的穿过车体几何。
+ *  - 步态/朝向/体型为程序化动画，非动作捕捉；零第三方模型 / 零贴图。
+ */
 
-const FEET_Y = RAIL.platformHeight;          // 1.25，人脚底
-const BODY_H = 0.90;
-const BODY_CY = FEET_Y + BODY_H / 2;          // 身体中心 1.70
-const HEAD_H = 0.26;
-const HEAD_CY = FEET_Y + BODY_H + HEAD_H / 2; // 头中心 2.28
-const LUG_H = 0.38;
-const LUG_CY = FEET_Y + LUG_H / 2;            // 行李中心 1.44
-const PLATFORM_NEAR = RAIL.platformEdge + 0.15; // 1.90，靠车门一侧，绝不小于站台边缘
-const PLATFORM_FAR = RAIL.platformEdge + RAIL.platformWidth - 1;
+// ---------------------------------------------------------------- 预算常量 ----
+/** 实例硬上限：5 个部件 mesh 满容量 ≈ 11,088 三角面(见 acquireShared 注释)，≤12000。 */
+const MAX_INSTANCES = 132;
+// 真实量级 → 站台可视人数的示意级压缩系数。原 0.05 让哈西高峰也只有 16 人、
+// 常日 6 人，450 m 站台看起来空无一人；0.12 下高峰约 35~40 人、常日 14~18 人，
+// 既有人气又远在 132 实例 / 11k 面预算内。
+const VISUAL_SCALE = 0.12;
+const STAFF_COUNT = 2;         // 站台客运员：固定立岗，资料见文件头第 2 轮
+const CLOTHING = [0x3a6ea5, 0xb5533c, 0x4f7d54, 0x8a6ea8, 0xc9963f, 0x4a4f5a, 0x2f7f8f, 0xa8586e, 0x6b7f4a, 0x9a5a3c];
+const PANTS = [0x2b3038, 0x3e4a5a, 0x4a4038, 0x30343a, 0x555a52];
+const SKINS = [0xe8c39e, 0xd8ac86, 0xf0d0b0, 0xc98f6b];
+const LUGGAGE_COLORS = [0x333a44, 0x5a3b2e, 0x24405a, 0x3a4a3a];
+const STAFF_VEST = 0xc6e04a;    // 荧光黄绿反光背心
+const STAFF_PANTS = 0x26303a;
 
-// 几何 / 材质模块级缓存 + 引用计数：多个 System 复用，最后一个 dispose 才真释放。
+const FEET_Y_FALLBACK = RAIL.platformHeight; // 1.25
+const SAFETY_LINE = 1.5;       // 安全警戒线距站台边缘(正线邻靠、>80km/h 取 1.5m)
+const EDGE_INSET = 0.5;        // 站台外缘留白
+const PART_MARGIN = 1.0;       // 部件(臂/腿/行李)相对人体锚点的最大横向偏移(含体型放大余量)
+const HARD_MIN_X = 3.6;        // 任务硬红线：任何实例矩阵 |x| ≥ 3.6
+const ANCHOR_MIN = HARD_MIN_X + PART_MARGIN; // 人体锚点 |x| 下限 = 4.6
+const WALK_SPEED = 1.25;       // m/s，据 Rail Baltica 1.1~1.4
+const BOARD_SPEED = 1.0;       // 车门口拥挤降速
+const GAIT_PER_M = 4.2;        // 步态相位 rad/米(步幅≈0.75m，一个周期≈1.5m)
+const FADE_SEC = 0.55;         // 淡出/淡入时长（连续，绝不瞬间消失）
+const QUEUE_GAP = 0.82;        // 同门排队纵向间距(m)
+const ALIGHT_Z_LANE = 1.5;     // 下车者相对车门 z 的偏道(m)，与上车者分流
+const BOARD_STAGGER = 0.55;    // 同门上车错峰(s) ≈ 车门 1 人/秒
+// 第 3 轮资料：四色地标 / 三层安全线 / 停稳时序 / 重联不相通
+const LANDMARK_COLORS = Object.freeze({ blue: 0x2f6fd0, yellow: 0xe0b53a, purple: 0x7d4fa8, green: 0x3a9d5a });
+const SAFETY_BELT = 1.0;       // 站台边缘 1 m 安全带(白线/盲道/黄色警戒线)，候车绝不进入
+const STOP_ERROR = 0.35;       // 对标误差 ±0.2~0.5 m，门位微偏移，不做零误差瞬停
+const BOARD_HOLD = 0.6;        // 车门打开(门灯/蜂鸣)后的停顿，再开始上车
+const ALIGHT_LEAD = 0.9;       // 下车流先行：先下后上，拆成两股不同时序
+const RETREAT_DIST = 1.2;      // 进站/出站/通过时整体后退到安全线内的额外距离(m)
+
+// 人体局部尺寸(m)，脚底 y=0，模型面朝 -Z
+const LEG_LEN = 0.82, LEG_W = 0.16, LEG_D = 0.18, LEG_X = 0.11, HIP_Y = 0.82;
+const TORSO_W = 0.40, TORSO_H = 0.62, TORSO_D = 0.24, TORSO_Y = HIP_Y + TORSO_H / 2;
+const HEAD_S = 0.24, HEAD_Y = HIP_Y + TORSO_H + HEAD_S / 2;
+const ARM_LEN = 0.58, ARM_W = 0.13, ARM_D = 0.14, ARM_X = TORSO_W / 2 + ARM_W / 2, SHOULDER_Y = HIP_Y + TORSO_H - 0.05;
+const LUG_W = 0.26, LUG_H = 0.40, LUG_D = 0.18;
+
+// ---------------------------------------------------------------- 共享资源 ----
+// 5 个部件几何 + 1 个 Lambert 材质(实例色由 instanceColor 给，零贴图)。
+// 预算(maxInstances=132)：head 132×12 + torso 132×12 + arms 264×12 + legs 264×12 + lug 132×12
+//   = 1584 + 1584 + 3168 + 3168 + 1584 = 11,088 三角面；5 个 InstancedMesh = 5 draw call；0 贴图。
 const _shared = { geos: null, mat: null, refs: 0 };
 function acquireShared() {
   if (!_shared.geos) {
-    _shared.geos = {
-      body: new THREE.BoxGeometry(0.42, BODY_H, 0.28),   // 12 三角面
-      head: new THREE.BoxGeometry(HEAD_H, HEAD_H, HEAD_H), // 12 三角面
-      lug: new THREE.BoxGeometry(0.26, LUG_H, 0.16),      // 12 三角面
-    };
-    _shared.mat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // 零贴图，实例色由 setColorAt 给
+    const g = {};
+    g.head = new THREE.BoxGeometry(HEAD_S, HEAD_S, HEAD_S);
+    g.torso = new THREE.BoxGeometry(TORSO_W, TORSO_H, TORSO_D);
+    g.arms = new THREE.BoxGeometry(ARM_W, ARM_LEN, ARM_D).translate(0, -ARM_LEN / 2, 0); // pivot 在肩
+    g.legs = new THREE.BoxGeometry(LEG_W, LEG_LEN, LEG_D).translate(0, -LEG_LEN / 2, 0); // pivot 在髋
+    g.lug = new THREE.BoxGeometry(LUG_W, LUG_H, LUG_D);
+    _shared.geos = g;
+    _shared.mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   }
   _shared.refs += 1;
   return _shared;
@@ -631,9 +775,7 @@ function acquireShared() {
 function releaseShared() {
   _shared.refs -= 1;
   if (_shared.refs <= 0 && _shared.geos) {
-    _shared.geos.body.dispose();
-    _shared.geos.head.dispose();
-    _shared.geos.lug.dispose();
+    for (const k of Object.keys(_shared.geos)) _shared.geos[k].dispose();
     _shared.mat.dispose();
     _shared.geos = null; _shared.mat = null; _shared.refs = 0;
   }
@@ -648,6 +790,14 @@ export function disposePassengers() {
   _systems.clear();
 }
 
+// ---------------------------------------------------------------- 数学小工具 ----
+/** 四色地标选色：蓝=8 正编 / 黄=16 正编 / 紫=8 反编 / 绿=16 反编（各站定义略有差异）。 */
+function landmarkColorFor(formation, dir) {
+  const big = formation >= 16;
+  const rev = dir < 0;
+  return rev ? (big ? LANDMARK_COLORS.green : LANDMARK_COLORS.purple)
+    : (big ? LANDMARK_COLORS.yellow : LANDMARK_COLORS.blue);
+}
 /** 由站台区间绝对里程 + dir/s 换算本地 z 范围（与 core.evaluateStop 同款公式）。 */
 function platformLocalRange(zone, s, dir) {
   const z0 = dir * (s - zone.s0);
@@ -669,9 +819,205 @@ function doorMids(train, zMin, zMax) {
   return out;
 }
 
+function shortAngle(from, to) {
+  let d = (to - from) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+function angleLerp(from, to, k) { return from + shortAngle(from, to) * clamp(k, 0, 1); }
+
+/**
+ * 把「任意来源」的站台 x 区间规范化成 [[a,b], ...]（原始、未内缩）。
+ * 接受：{x0,x1} / {near,far} / {inner,outer} / [a,b] / [[a,b]...] / {bands:[...]}。
+ * 元素含非有限数一律丢弃，避免 NaN 漏进坐标。
+ */
+function asRawBands(v) {
+  if (v == null || typeof v === 'function' || typeof v === 'number') return null;
+  const out = [];
+  const push = (a, b) => {
+    const na = Number(a); const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb)) out.push([Math.min(na, nb), Math.max(na, nb)]);
+  };
+  if (Array.isArray(v)) {
+    if (v.length >= 2 && typeof v[0] === 'number' && typeof v[1] === 'number') push(v[0], v[1]);
+    else for (const e of v) { const r = asRawBands(e); if (r) out.push(...r); }
+  } else if (typeof v === 'object') {
+    if (v.bands) { const r = asRawBands(v.bands); if (r) out.push(...r); }
+    else push(v.x0 ?? v.near ?? v.inner, v.x1 ?? v.far ?? v.outer);
+  }
+  return out.length ? out : null;
+}
+
+/**
+ * 由 StationLayout 数据 + RAIL 常量复现「站场股道/站台 x 排布」，返回站台体 x 区间数组
+ * [[x0,x1], ...]（站场中心为原点，与 buildStationField 的 field.position.x=0 对齐）。
+ *
+ * 口径与 stations.js 的 fieldTrackLayout 一致：夹站台的股道间隙要塞下「站台宽 + 两侧 EDGE」，
+ * 不夹站台的按 trackCenters+1.5；中央正线通道清空(无站台、列车固定在 x≈0 可见)，站台
+ * 对称分布到通道两侧，最后整体减 midX 居中。**全部由 layout.platformCount / trackCount /
+ * mainTracks / platformWidth / platformEdge 与 RAIL.trackCenters 驱动，不写死任何股道索引**。
+ *
+ * 这是「示意级几何复现」，用于在没有 ctx 注入时把乘客对齐到真实站台；若站场算法调整，
+ * 宿主/站场 agent 应优先用 ctx.platformBands 或 opts.resolvePlatformBand 注入精确区间覆盖。
+ */
+function bandsFromLayout(layout) {
+  const T = Math.max(1, Math.round(Number(layout?.trackCount) || 0));
+  const P = Math.max(1, Math.round(Number(layout?.platformCount) || 0));
+  if (T < 2 || !Number.isFinite(T)) return null;
+  const PW = Number(layout?.platformWidth) || RAIL.platformWidth;
+  const EDGE = Number(layout?.platformEdge) || RAIL.platformEdge;
+  const PLAT_GAP = PW + 2 * EDGE;                 // 夹站台的股道中心距 = 12 + 3.5 = 15.5
+  const TRACK_GAP = RAIL.trackCenters + 1.5;      // stations.js FIELD.TRACK_GAP 口径 = 6.5
+  const gaps = T - 1;
+  const nPlat = Math.min(P, Math.max(1, gaps));
+  const mains = (Array.isArray(layout?.mainTracks) && layout.mainTracks.length)
+    ? layout.mainTracks : [Math.floor((T - 1) / 2), Math.floor(T / 2)];
+  const lo = Math.min(...mains); const hi = Math.max(...mains);
+  let clearLo; let clearHi;
+  if (T >= 8) { clearLo = lo - 1; clearHi = hi; } else { clearLo = lo; clearHi = hi - 1; }
+  clearLo = Math.max(0, clearLo); clearHi = Math.min(gaps - 1, clearHi);
+  const has = new Array(gaps).fill(false);
+  const leftMax = clearLo - 1; const rightMin = clearHi + 1;
+  const leftCount = Math.max(0, leftMax + 1); const rightCount = Math.max(0, gaps - rightMin);
+  const perSide = Math.min(Math.floor(nPlat / 2), leftCount, rightCount);
+  const pick = (a, b, n) => {
+    if (n <= 0) return [];
+    if (n === 1) return [Math.round((a + b) / 2)];
+    return Array.from({ length: n }, (_, k) => Math.round(a + (k * (b - a)) / (n - 1)));
+  };
+  for (const j of pick(0, leftMax, perSide)) {
+    has[Math.min(gaps - 1, j)] = true;
+    has[Math.min(gaps - 1, gaps - 1 - j)] = true;   // 镜像 → 站场关于中心严格对称
+  }
+  let placed = has.filter(Boolean).length;
+  for (let j = 0; j < gaps && placed < nPlat; j += 1) {
+    if (!has[j] && (j < clearLo || j > clearHi)) { has[j] = true; placed += 1; }
+  }
+  const tx = [0];
+  for (let j = 0; j < gaps; j += 1) tx.push(tx[j] + (has[j] ? PLAT_GAP : TRACK_GAP));
+  const midX = (tx[0] + tx[T - 1]) / 2;
+  for (let i = 0; i < T; i += 1) tx[i] -= midX;
+  const out = [];
+  for (let j = 0; j < gaps; j += 1) {
+    if (!has[j]) continue;
+    const px = (tx[j] + tx[j + 1]) / 2;            // 站台中心（站场中心为原点）
+    out.push([px - PW / 2, px + PW / 2]);           // 站台宽 PW，两边缘各距相邻股道中心 EDGE
+  }
+  return out.length ? out : null;
+}
+
+/**
+ * 推导「当前站台合法锚点 x 带」：返回 [{ sign, lo, hi, y }]。
+ * sign 为侧别(+1 正 x / -1 负 x)；[lo,hi] 是**人体锚点** |x| 的合法区间（已内缩安全线、
+ * 部件余量、外缘留白，且 lo ≥ ANCHOR_MIN），这样部件最外缘仍 |x| ≥ HARD_MIN_X、≤ 站台外缘。
+ * 优先级：opts.resolvePlatformBand 回调 > 框架层透传的「lane 横移后当前停靠到发线」精确单带
+ *   (zone.platformBand / platformX0,x1 / zone.platformBands) > ctx.platformBands(station-realism
+ *   当前站带：ARRIVE 有透传时已是精确单带，否则整站全宽) > ctx.platformBandsByStation[stationId]
+ *   (station-realism 每次 ARRIVE 同步覆盖：有透传时=同一份精确单带与①②恒一致、无透传时
+ *   重算整站全宽且无跨站残留；故三条路径谁先命中都不打架) > c/ctx.state/pack > stationLayouts[id].platformBands
+ *   / platformX0,x1 > ctx.zones 命中项 > bandsFromLayout(layout) > RAIL 退化。
+ * 注1：注入的是「站台全宽」[px-w/2, px+w/2]（如 [11.5,23.5]），本函数统一内缩安全线+
+ *   部件余量+外缘留白得候车锚点带（如 [14,22]），部件最外缘仍避开贴边白线/盲道/1m 警戒线；
+ *   与 fieldTrackLayout 同源推导，不写死股道索引。
+ * 注2：刻意不用 zone.platformIndex 硬索引 stopZones 挑单带——platformIndex 是按 trackIndex
+ *   均匀分摊的「逻辑序号」，与站台几何顺序不是一套口径(station-layouts.js)，硬映射会错位；
+ *   精确单带一律走框架透传的 zone.platformBand / ctx.platformBands。
+ * 注3（坐标系契约）：返回的 [lo,hi] 直接作为乘客实例的**世界 x** (group 挂 scene、单位变换)。
+ *   注入源必须是「相对列车原点/世界坐标系」的带，且 lane≠MAIN 时已含站场 chunk 的横移 Δx；
+ *   若给的是站场局部坐标(相对正线中心 x=0)，lane=MAIN 下二者一致(当前正确)，lane≠MAIN 下
+ *   整体偏 Δx 会踩空/悬空。Δx 由框架层在 StopZone 上换算，本模块不复制 alignment 数学。
+ */
+function resolveBands(zone, c, opts, ctxRef, stationId) {
+  const layouts = opts.layouts || c?.pack?.stationLayouts || ctxRef?.pack?.stationLayouts || {};
+  const layout = layouts[zone?.stationId] || layouts[zone?.name] || layouts[stationId] || null;
+  const feetY = clamp(Number(layout?.platformHeight) || FEET_Y_FALLBACK, 0.8, 1.6);
+  const side = opts.platformSide || 'right';
+
+  // station-realism 注入：按 stationId 索引的带。其 ARRIVE 会先把所有站重算为同源静态
+  // 全宽带(无跨站残留)，再对当前站在有精确带透传时覆盖成那条单带——即「有透传=精确单带、
+  // 与①②同源恒一致；无透传=整站全宽」。放③仅作兜底，三条路径谁先命中都不会打架。
+  const byStation = c?.platformBandsByStation || ctxRef?.platformBandsByStation;
+  const stationBands = byStation?.[zone?.stationId] || byStation?.[zone?.name]
+    || byStation?.[stationId] || null;
+
+  const tryList = [];
+  if (typeof opts.resolvePlatformBand === 'function') {
+    try { tryList.push(opts.resolvePlatformBand(zone, c, RAIL)); } catch (_) { /* 宿主回调出错则忽略 */ }
+  }
+  tryList.push(
+    // ① 框架层透传的「lane 横移后当前停靠到发线」精确单带：几何精度最高，最优先。
+    //    station-realism 在 ARRIVE 会把 zone.platformBand 透传成 ctx.platformBands=[单带]。
+    zone?.platformBand,
+    (zone?.platformX0 != null ? [zone.platformX0, zone.platformX1] : null),
+    zone?.platformBands,
+    // ② station-realism 当前站带：有透传时已是精确单带，否则整站全宽(末尾取最近 1 条)
+    c?.platformBands, c?.platformBand, ctxRef?.platformBands, ctxRef?.platformBand,
+    c?.state?.platformBands, c?.state?.platformBand, ctxRef?.state?.platformBands,
+    // ③ 按站带：有透传时已是精确单带(与①②一致)、无透传时整站全宽；稳定兜底
+    stationBands,
+    // ④ 其余静态注入
+    c?.pack?.platformBands, ctxRef?.pack?.platformBands,
+    layout?.platformBands, layout?.platformBand,
+    (layout?.platformX0 != null ? [layout.platformX0, layout.platformX1] : null),
+  );
+  const zoneList = c?.zones || ctxRef?.zones;
+  const cz = Array.isArray(zoneList)
+    ? zoneList.find((z) => z && (z.id === zone?.id || z.stationId === zone?.stationId)) : null;
+  if (cz) tryList.push(cz.platformBands, cz.platformBand,
+    (cz.platformX0 != null ? [cz.platformX0, cz.platformX1] : null));
+
+  let raw = null;
+  for (const t of tryList) { const r = asRawBands(t); if (r) { raw = r; break; } }
+
+  // 无注入时优先由 StationLayout 数据推导真实站台区间（站场改成「中央通道无站台」后，
+  // 站台并不在 ±platformEdge，而是在通道两侧较远处；用退化公式会让人站到道床上）。
+  if (!raw) raw = bandsFromLayout(layout);
+
+  // 最终兜底：RAIL 常量在正线两侧各造一条 [edge, edge+w]（任务给的退化带口径）。
+  if (!raw) {
+    const edge = Number(layout?.platformEdge) || RAIL.platformEdge;
+    const w = Number(layout?.platformWidth) || RAIL.platformWidth;
+    raw = [[edge, edge + w], [-(edge + w), -edge]];
+  }
+
+  const bands = [];
+  for (const [a, b] of raw) {
+    const sign = (a + b) / 2 >= 0 ? 1 : -1;
+    const near = Math.min(Math.abs(a), Math.abs(b));
+    const far = Math.max(Math.abs(a), Math.abs(b));
+    let lo = Math.max(near + SAFETY_LINE + PART_MARGIN, ANCHOR_MIN);
+    let hi = far - EDGE_INSET - PART_MARGIN;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue;
+    if (hi < lo) { lo = Math.max(ANCHOR_MIN, (near + far) / 2); hi = lo; }
+    if (hi - lo < 0.8) { lo = Math.max(ANCHOR_MIN, (lo + hi) / 2 - 0.4); hi = lo + 0.8; }
+    bands.push({ sign, lo: Math.max(lo, ANCHOR_MIN), hi, y: feetY });
+  }
+  // 只保留「离正线最近」的站台带（本车次停靠乘降的那座站台），避免把候车者分到远端站台。
+  // 大站推导会产出多座站台，全部保留会让人散到几十米外；单侧取 1 条、双侧正负各取 1 条。
+  const byNear = (p, q) => p.lo - q.lo;
+  let use;
+  if (side === 'right' || side === 'left') {
+    const pool = bands.filter((x) => (side === 'right' ? x.sign > 0 : x.sign < 0));
+    use = pool.sort(byNear).slice(0, 1);
+  } else {
+    const pos = bands.filter((x) => x.sign > 0).sort(byNear)[0];
+    const neg = bands.filter((x) => x.sign < 0).sort(byNear)[0];
+    use = [pos, neg].filter(Boolean);
+  }
+  if (!use.length) use = bands.sort(byNear).slice(0, 1);
+  if (!use.length) {
+    use = [{ sign: 1, lo: ANCHOR_MIN,
+      hi: Math.max(ANCHOR_MIN + 1, RAIL.platformEdge + RAIL.platformWidth - EDGE_INSET - PART_MARGIN),
+      y: feetY }];
+  }
+  return use;
+}
+
 /**
  * createPassengerSystem(ctx, opts) → Standard System
- * opts = { layouts, capacity(FLEET_CAPACITY), maxInstances?, visualScale?, platformSide? }
+ * opts = { layouts, capacity(FLEET_CAPACITY), maxInstances?, visualScale?, platformSide?,
+ *          staff?, resolvePlatformBand?(zone, ctx, RAIL) }
  * 由 packs/harbin.js 以 createPassengers 适配口调用。
  */
 export function createPassengerSystem(ctx, opts = {}) {
@@ -679,7 +1025,6 @@ export function createPassengerSystem(ctx, opts = {}) {
   const maxInstances = clamp(opts.maxInstances ?? MAX_INSTANCES, 1, MAX_INSTANCES);
   const maxWaiting = clamp(opts.maxWaiting ?? 110, 1, maxInstances);
   const visualScale = opts.visualScale ?? VISUAL_SCALE;
-  const lugCount = Math.min(LUGGAGE_INSTANCES, maxInstances);
   const flow = createFlowModel({ fleet });
 
   const S = {
@@ -689,15 +1034,25 @@ export function createPassengerSystem(ctx, opts = {}) {
     waiting: 0, onboard: 0, alighted: 0, boarded: 0,
     capacity: 0,
     doorMid: [], zMin: -200, zMax: 200,
-    serviceSeq: 0, theme: 'day', themeMul: 1,
+    bands: [{ sign: 1, lo: ANCHOR_MIN,
+      hi: Math.max(ANCHOR_MIN + 1, RAIL.platformEdge + RAIL.platformWidth - EDGE_INSET - PART_MARGIN),
+      y: FEET_Y_FALLBACK }],
+    serviceSeq: 0, theme: 'day', themeMul: 1, time: 0,
+    retreat: false,             // 进站/出站/通过：站台人员整体后退到安全线内
+    landmark: 0,                // 当前车次四色地标色(instanceColor 示意)
+    formation: 8,
     agents: [],                // 实例池：长度 = maxInstances，下标 = instance 下标
   };
 
   let scene = null; let group = null;
-  let bodyMesh = null; let headMesh = null; let lugMesh = null;
-  const dummy = new THREE.Object3D();
+  let headMesh = null; let torsoMesh = null; let armsMesh = null; let legsMesh = null; let lugMesh = null;
+  const dummy = new THREE.Object3D();     // hide 用
+  const root = new THREE.Object3D();      // 人体根(位置/朝向/体型/fade)
+  const part = new THREE.Object3D();      // 部件局部
+  const M = new THREE.Matrix4();          // root.matrix × part.matrix，复用零分配
   const color = new THREE.Color();
   const color2 = new THREE.Color();
+  const tmpColor = new THREE.Color();
 
   // ---- 实例池小工具 ----
   function hide(mesh, i) {
@@ -708,49 +1063,147 @@ export function createPassengerSystem(ctx, opts = {}) {
     mesh.setMatrixAt(i, dummy.matrix);
   }
 
+  /** 把「部件局部变换 × 人体根变换」写入 InstancedMesh 第 idx 个实例。 */
+  function place(x, y, z, rx, ry, rz, sx, sy, sz, mesh, idx) {
+    part.position.set(x, y, z);
+    part.rotation.set(rx, ry, rz);
+    part.scale.set(sx, sy, sz);
+    part.updateMatrix();
+    M.multiplyMatrices(root.matrix, part.matrix);
+    mesh.setMatrixAt(idx, M);
+  }
+
   function applyColor(a) {
-    if (!bodyMesh) return;
-    color.setHex(a.tint).multiplyScalar(S.themeMul);
-    bodyMesh.setColorAt(a.i, color);
-    color2.setHex(SKIN).multiplyScalar(0.55 + 0.45 * S.themeMul);
+    if (!headMesh) return;
+    const m = S.themeMul;
+    color.setHex(a.tint).multiplyScalar(m);
+    if (a.landmark) color.lerp(tmpColor.setHex(a.landmark), 0.22); // 四色地标：队列衣着色偏(顶点色,零成本)
+    torsoMesh.setColorAt(a.i, color);
+    armsMesh.setColorAt(2 * a.i, color);
+    armsMesh.setColorAt(2 * a.i + 1, color);
+    color2.setHex(a.pants).multiplyScalar(m);
+    legsMesh.setColorAt(2 * a.i, color2);
+    legsMesh.setColorAt(2 * a.i + 1, color2);
+    color2.setHex(a.skin).multiplyScalar(0.55 + 0.45 * m);
     headMesh.setColorAt(a.i, color2);
-    if (a.i < lugCount && a.hasLug) {
-      color2.setHex(LUGGAGE_COLOR).multiplyScalar(0.6 + 0.4 * S.themeMul);
+    if (a.lugType) {
+      color2.setHex(a.lugColor).multiplyScalar(m);
       lugMesh.setColorAt(a.i, color2);
     }
   }
 
   function refreshColors() {
-    if (!bodyMesh) return;
+    if (!headMesh) return;
     for (const a of S.agents) if (a.active) applyColor(a);
-    bodyMesh.instanceColor.needsUpdate = true;
-    headMesh.instanceColor.needsUpdate = true;
-    if (lugMesh) lugMesh.instanceColor.needsUpdate = true;
+    for (const mesh of [headMesh, torsoMesh, armsMesh, legsMesh, lugMesh]) {
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
-  function spawnAgent(stateName, carIndex, x, z, rand) {
+  /** 硬钳位：人体锚点 x 落在所属带的 [lo,hi]（⇒ |x| ≥ ANCHOR_MIN > HARD_MIN_X），z 在停车区间内。 */
+  function clampAgent(a) {
+    const b = a.bandRef || S.bands[0];
+    const sign = a.sign || b.sign || 1;
+    a.x = sign * clamp(sign * a.x, b.lo, b.hi);
+    a.z = clamp(a.z, S.zMin + 0.6, S.zMax - 0.6);
+    a.feetY = b.y || FEET_Y_FALLBACK;
+  }
+
+  function spawnAgent(phase, lane, carIndex, x, z, rand) {
     const a = S.agents.find((p) => !p.active);
     if (!a) return null; // 硬钳位：池满就不再生成
-    a.active = true; a.state = stateName; a.carIndex = carIndex;
-    a.x = x; a.z = z; a.baseX = x; a.baseZ = z;
-    a.tx = x; a.tz = z; a.t = 0; a.life = 3; a.dirZ = rand() < 0.5 ? 1 : -1;
-    a.facing = rand() < 0.5 ? 0 : Math.PI;
+    const band = S.bands[carIndex % S.bands.length] || S.bands[0];
+    a.active = true; a.phase = phase; a.lane = lane; a.carIndex = carIndex;
+    a.bandRef = band; a.sign = band.sign;
+    a.x = x; a.z = z; a.feetY = band.y;
+    a.facing = band.sign > 0 ? Math.PI / 2 : -Math.PI / 2; // 面朝列车
+    a.gait = rand() * Math.PI * 2;
+    a.fade = 0; a.fading = true; a.fadeTarget = 1;          // 连续淡入，绝不闪现
+    a.height = 0.92 + rand() * 0.16; a.girth = 0.9 + rand() * 0.22;
     a.tint = CLOTHING[Math.floor(rand() * CLOTHING.length) % CLOTHING.length];
-    a.hasLug = rand() < 0.35;
-    // 负指数分布的离站/候车时长（口径见文件头「客流仿真常规做法」），用带 seed 的 rand 保证可重现
-    a.expLife = -Math.log(1 - 0.99 * rand()) / 0.45 + 2;
+    a.pants = PANTS[Math.floor(rand() * PANTS.length) % PANTS.length];
+    a.skin = SKINS[Math.floor(rand() * SKINS.length) % SKINS.length];
+    a.lugColor = LUGGAGE_COLORS[Math.floor(rand() * LUGGAGE_COLORS.length) % LUGGAGE_COLORS.length];
+    a.lugType = rand() < 0.30 ? (rand() < 0.6 ? 1 : 2) : 0;  // 1 拉杆箱 2 背包
+    // 16 辆重联 8/9 节不相通：排队/离站按所在半列朝两端发散，不生成贯通人流
+    const half = Math.max(1, Math.floor((S.doorMid.length || 8) / 2));
+    a.leaveDir = carIndex < half ? -1 : 1;
+    a.queueX = x; a.landmark = 0;   // 排队位(用于停稳归位/进站后退) / 地标色(候车者才有)
+    a.path = []; a.seg = []; a.total = 0; a.dist = 0;
+    a.speed = WALK_SPEED; a.next = null; a.startDelay = 0;
+    a.t = 0; a.waitT = rand() * 6; a.doorZ = 0; a.boarded = false;
+    clampAgent(a);
     applyColor(a);
     return a;
   }
 
   function freeAgent(a) {
-    a.active = false; a.state = 'idle'; a.t = 0;
+    a.active = false; a.phase = 'idle'; a.fading = false; a.fade = 0;
+    a.path = []; a.next = null;
   }
+
+  function startFade(a, target) { a.fading = true; a.fadeTarget = target; }
 
   function countWaiting() {
     let n = 0;
-    for (const a of S.agents) if (a.active && a.state === 'waiting') n += 1;
+    for (const a of S.agents) if (a.active && a.lane === 'board' && a.phase !== 'onboard') n += 1;
     return n;
+  }
+
+  // ---- 路径（弧长参数化，连续插值）----
+  function beginLeg(a, waypoints, speed, next, startDelay = 0) {
+    const path = [{ x: a.x, z: a.z }];
+    for (const p of waypoints) {
+      const nx = Number(p.x); const nz = Number(p.z);
+      path.push({ x: Number.isFinite(nx) ? nx : a.x, z: Number.isFinite(nz) ? nz : a.z });
+    }
+    const seg = [0];
+    for (let i = 1; i < path.length; i += 1) {
+      seg.push(seg[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
+    }
+    a.path = path; a.seg = seg; a.total = seg[seg.length - 1];
+    a.dist = 0; a.speed = speed; a.next = next; a.startDelay = startDelay; a.t = 0;
+  }
+
+  function positionOnPath(a) {
+    const { path, seg, total } = a;
+    if (!path.length) return { x: a.x, z: a.z, dx: 0, dz: -1 };
+    const d = clamp(a.dist, 0, total);
+    let k = 0;
+    while (k < seg.length - 1 && d > seg[k + 1]) k += 1;
+    const s0 = seg[k]; const s1 = seg[k + 1] ?? s0;
+    const t = s1 > s0 ? clamp((d - s0) / (s1 - s0), 0, 1) : 0;
+    const p0 = path[k]; const p1 = path[k + 1] || p0;
+    const dx = p1.x - p0.x; const dz = p1.z - p0.z;
+    const len = Math.hypot(dx, dz) || 1;
+    return { x: p0.x + dx * t, z: p0.z + dz * t, dx: dx / len, dz: dz / len };
+  }
+
+  /** 一段路径走完后的阶段转移（只生成下一段连续路径 / 触发淡出，绝不瞬移、绝不直接 free）。 */
+  function onLegEnd(a) {
+    const nx = a.next; a.next = null;
+    const b = a.bandRef || S.bands[0];
+    switch (nx) {
+      case 'boarded-approach': { // 走到车门前 → 登车：朝车门再走一小段并连续淡出
+        a.phase = 'boarding';
+        const doorX = a.sign * (b.lo + 0.02);
+        beginLeg(a, [{ x: doorX, z: a.z }], BOARD_SPEED, 'onboard');
+        startFade(a, 0);
+        break;
+      }
+      case 'onboard':
+        a.phase = 'onboard';
+        startFade(a, 0);
+        break;
+      case 'alight-leave': // 下车走到站台外侧 → 沿站台离站
+        a.phase = 'leaving';
+        beginLeg(a, [{ x: a.x, z: a.z + a.leaveDir * 4 }], WALK_SPEED * 1.05, 'gone');
+        break;
+      case 'gone':
+      default:
+        startFade(a, 0); // 到点后连续淡出（不 free，由 fade 完成后再 free）
+        break;
+    }
   }
 
   // ---- 车门 / 列车 ----
@@ -776,7 +1229,7 @@ export function createPassengerSystem(ctx, opts = {}) {
 
   function syncStats(train) {
     S.capacity = train?.capacity || 0;
-    S.onboard = S.carLoad.reduce((a, b) => a + Math.max(0, b), 0);
+    S.onboard = S.carLoad.reduce((x, y) => x + Math.max(0, y), 0);
   }
 
   /** 首次到站 / 换车型时，按 40%~70% 上座率播种「已在车上」的旅客，供下车事件扣减。 */
@@ -787,6 +1240,21 @@ export function createPassengerSystem(ctx, opts = {}) {
       S.carLoad = new Array(n).fill(0);
       for (let i = 0; i < n; i += 1) {
         S.carLoad[i] = Math.round(train.seatsPerCar[i] * (0.4 + 0.3 * rand()));
+      }
+    }
+  }
+
+  /** 站台客运员：平行安全线固定立岗、面朝列车、进出站全程在岗（资料见文件头第 2 轮）。 */
+  function spawnStaff(rand) {
+    const b = S.bands[0];
+    for (let i = 0; i < STAFF_COUNT; i += 1) {
+      const z = clamp((i === 0 ? -1 : 1) * Math.min(20, (S.zMax - S.zMin) * 0.22), S.zMin + 1, S.zMax - 1);
+      const x = b.sign * b.lo;
+      const a = spawnAgent('staff', 'staff', 0, x, z, rand);
+      if (a) {
+        a.tint = STAFF_VEST; a.pants = STAFF_PANTS; a.height = 1.0 + rand() * 0.06;
+        a.lugType = 0; a.facing = b.sign > 0 ? Math.PI / 2 : -Math.PI / 2;
+        applyColor(a);
       }
     }
   }
@@ -807,21 +1275,32 @@ export function createPassengerSystem(ctx, opts = {}) {
     const [zMin, zMax] = platformLocalRange(zone, s, dir);
     S.zMin = zMin; S.zMax = zMax;
     S.doorMid = doorMids(train, zMin, zMax);
+    S.bands = resolveBands(zone, c, opts, ctx, S.station); // ★ 先算真实站台带
     ensureCarLoad(train, rand);
+
+    S.retreat = false;          // 列车停稳：候车者归位到成列排队位（仍全在安全线内）
+    S.formation = train?.seatsPerCar?.length || 8;
+    S.landmark = landmarkColorFor(S.formation, c?.dir ?? 1);
+    if (opts.staff !== false) spawnStaff(rand);
 
     // 真实量级(泊松到达/分钟) × 示意级压缩 → 站台可视候车人数
     const arrivalsPerMin = flow.sampleArrivals(S.station, minute, rand);
-    const want = clamp(Math.round(arrivalsPerMin * visualScale * 8), 6, maxWaiting);
+    const want = clamp(Math.round(arrivalsPerMin * visualScale * 8), 10, maxWaiting);
     const cars = S.doorMid.length || 1;
+    const half = Math.max(1, Math.floor(cars / 2));
     for (let k = 0; k < want; k += 1) {
-      const ci = k % cars; // 按车厢分流（车门就近的大白话近似：轮流分到各车门）
-      const z = clamp(S.doorMid[ci] + (rand() - 0.5) * 6, zMin + 1, zMax - 1);
-      const x = PLATFORM_NEAR + 0.7 + rand() * 2.6;
-      const a = spawnAgent('waiting', ci, x, z, rand);
-      if (a) {
-        a.tx = PLATFORM_NEAR;
-        a.tz = S.doorMid[ci];
-      }
+      const ci = k % cars;                        // 每队对准一个车厢门地标，按色块成列、不随机撒点
+      const band = S.bands[ci % S.bands.length];
+      const rank = Math.floor(k / cars);
+      const col = rank % 2; const row = Math.floor(rank / 2);
+      // 对标误差 ±20~50 cm：门位按站/车次确定性微偏移，不做零误差瞬停
+      const doorZ = clamp(S.doorMid[ci] + (rand() - 0.5) * 2 * STOP_ERROR, zMin + 1, zMax - 1);
+      // 同门 1~2 列、纵向间距 QUEUE_GAP；重联时按半列朝两端发散，绝不跨 8/9 节贯通
+      const qz = clamp(doorZ + (ci < half ? -1 : 1) * (row + 1) * QUEUE_GAP, zMin + 1, zMax - 1);
+      // 候车 x 严格成列(去掉随机撒点)，全在安全线内侧、绝不越 1 m 安全带
+      const qx = band.sign * clamp(band.lo + 1.4 + col * 0.9, band.lo, band.hi);
+      const a = spawnAgent('waiting', 'board', ci, qx, qz, rand);
+      if (a) { a.doorZ = doorZ; a.queueX = qx; a.landmark = S.landmark; applyColor(a); }
     }
     S.waiting = countWaiting();
     syncStats(train);
@@ -830,11 +1309,12 @@ export function createPassengerSystem(ctx, opts = {}) {
   function onDoors(payload, c) {
     S.doorOpen = payload?.state === DOOR_STATE.OPEN && Boolean(c?.doorsCanOpen);
     if (!S.doorOpen) {
-      // 关门锁：立即停止上下车（boarding 视作已上车直接消失，alighting 转为离站）
+      // 关门锁：不再新发上下车；还没到车门的上车者转身沿站台离开并淡出（不瞬移）；
+      // 已在 boarding/alighting/leaving 的人让它们把当前连续动作走完。
       for (const a of S.agents) {
-        if (!a.active) continue;
-        if (a.state === 'boarding') freeAgent(a);
-        else if (a.state === 'alighting') { a.state = 'leaving'; a.t = 0; a.life = 2; }
+        if (!a.active || a.lane !== 'board' || a.phase !== 'walking') continue;
+        a.lane = 'leave'; a.phase = 'leaving';
+        beginLeg(a, [{ x: a.x, z: a.z + a.leaveDir * 3 }], WALK_SPEED, 'gone');
       }
     }
   }
@@ -847,15 +1327,18 @@ export function createPassengerSystem(ctx, opts = {}) {
     const rand = rng(hash32(`${S.station}|alight|${S.serviceSeq}`));
     const res = flow.alight(train, S.carLoad, zone, rand);
     S.alighted += res.alighted;
-    // 为下车旅客生成可视化小人（每车厢最多取 6 个代表，避免实例爆掉；carLoad 仍是全量）
+    // 为下车旅客生成可视化小人（每车厢最多取 6 个代表，carLoad 仍是全量）
     for (let i = 0; i < res.perCar.length; i += 1) {
       const show = Math.min(res.perCar[i], 6);
       for (let k = 0; k < show; k += 1) {
-        const z = clamp(S.doorMid[i] ?? 0, S.zMin + 1, S.zMax - 1);
-        const a = spawnAgent('alighting', i, PLATFORM_NEAR + 0.3 + rand() * 0.5, z, rand);
+        const band = S.bands[i % S.bands.length];
+        const doorZ = clamp(S.doorMid[i] ?? 0, S.zMin + 1, S.zMax - 1);
+        const startX = band.sign * (band.lo + 0.05);                    // 车门口(最靠内的锚点)
+        const startZ = clamp(doorZ + ALIGHT_Z_LANE, S.zMin + 1, S.zMax - 1); // 外侧 z 车道
+        const a = spawnAgent('alighting', 'alight', i, startX, startZ, rand);
         if (a) {
-          a.tx = PLATFORM_NEAR + 2.2 + rand() * 1.5;
-          a.tz = z + (rand() - 0.5) * 3;
+          const farX = band.sign * clamp(band.hi - 0.4, band.lo, band.hi);
+          beginLeg(a, [{ x: farX, z: startZ + rand() * 1.5 }], WALK_SPEED, 'alight-leave', 0.05 + k * 0.12);
         }
       }
     }
@@ -867,92 +1350,150 @@ export function createPassengerSystem(ctx, opts = {}) {
     const train = payload?.train || S.train || resolveTrain(c);
     const zone = payload?.zone || S.zone;
     if (!train) return;
-    const waitingAgents = S.agents.filter((a) => a.active && a.state === 'waiting');
+    const waitingAgents = S.agents.filter((a) => a.active && a.lane === 'board' && a.phase === 'waiting');
     const res = flow.board(train, S.carLoad, waitingAgents.length, zone);
     S.boarded += res.boarded;
-    let taken = 0;
+    // 按车厢门分组、组内按「离门近的先上」排序并 ≈1 人/秒错峰 → 先下后上、不互相穿透
+    const byCar = new Map();
     for (const a of waitingAgents) {
-      if (taken >= res.boarded) break; // 超员：剩下的继续 waiting 排队
-      a.state = 'boarding'; a.t = 0;
-      a.tx = PLATFORM_NEAR;
-      a.tz = S.doorMid[a.carIndex] ?? a.baseZ;
-      taken += 1;
+      if (!byCar.has(a.carIndex)) byCar.set(a.carIndex, []);
+      byCar.get(a.carIndex).push(a);
+    }
+    let taken = 0;
+    for (const [, list] of byCar) {
+      list.sort((p, q) => Math.abs(p.z - p.doorZ) - Math.abs(q.z - q.doorZ));
+      for (let j = 0; j < list.length && taken < res.boarded; j += 1) {
+        const a = list[j];
+        taken += 1;
+        a.phase = 'walking';
+        const b = a.bandRef || S.bands[0];
+        const doorZ = clamp(a.doorZ || S.doorMid[a.carIndex] || 0, S.zMin + 1, S.zMax - 1);
+        const approachX = b.sign * (b.lo + 0.55);
+        // 两段连续路径：先纵向对齐车门 z，再横向走到车门前；到点后转 boarding→onboard
+        beginLeg(a, [
+          { x: a.x, z: doorZ },
+          { x: approachX, z: doorZ },
+        ], BOARD_SPEED, 'boarded-approach', BOARD_HOLD + ALIGHT_LEAD + j * BOARD_STAGGER); // 门开(门灯/蜂鸣)后延迟，下车流先行
+      }
+      if (taken >= res.boarded) break;
     }
     S.waiting = countWaiting();
     syncStats(train);
   }
 
   function onDepart() {
-    // 清空站台客流：没上车的候车者沿站台走几步后消失；车上旅客(S.carLoad)带到下一站
+    S.retreat = true;           // 出站/发车：站台人员整体后退到安全线内，绝不贴近边缘
+    // 清空站台客流：没上车的人沿站台连续走开后淡出；车上旅客(S.carLoad)带到下一站；
+    // 已在离站流程的人让它们走完；客运员撤岗也淡出。全程无瞬移、无突然 free。
     for (const a of S.agents) {
-      if (a.active && (a.state === 'waiting' || a.state === 'boarding')) {
-        a.state = 'leaving'; a.t = 0; a.life = 3;
+      if (!a.active) continue;
+      if (a.lane === 'staff') { startFade(a, 0); continue; }
+      if (a.phase === 'onboard') { startFade(a, 0); continue; }
+      if (a.lane === 'alight' || a.lane === 'leave') {
+        if (a.next === null && !a.fading) startFade(a, 0);
+        continue;
       }
+      a.lane = 'leave'; a.phase = 'leaving';
+      const bx = a.bandRef || S.bands[0];
+      const backX = a.sign * clamp(Math.abs(a.x) + RETREAT_DIST, bx.lo, bx.hi);
+      beginLeg(a, [
+        { x: backX, z: a.z },                        // 出站/通过：先整体后退到安全线内
+        { x: backX, z: a.z + a.leaveDir * 3 },      // 再沿站台朝所在半列外侧离站
+      ], WALK_SPEED, 'gone');
     }
     S.waiting = 0;
     S.doorOpen = false;
     S.zone = null;
   }
 
-  // ---- 每帧：走动 + 写实例矩阵 ----
-  function stepAgent(a, dt, doorOpen) {
+  // ---- 每帧：状态机推进 + 步态 + 写实例矩阵 ----
+  function advanceAgent(a, dt) {
     a.t += dt;
-    switch (a.state) {
-      case 'waiting': // 站台候车：原地小幅晃动，绝不离开站台
-        a.x = a.baseX + Math.sin(a.t * 1.2 + a.i) * 0.04;
-        a.z = a.baseZ + Math.cos(a.t * 0.9 + a.i) * 0.05;
+    // 淡入/淡出：连续到 0 才 free（绝不瞬间消失）
+    if (a.fading) {
+      const step = dt / FADE_SEC;
+      a.fade += clamp(a.fadeTarget - a.fade, -step, step);
+      if (Math.abs(a.fade - a.fadeTarget) < 1e-3) {
+        a.fade = a.fadeTarget; a.fading = false;
+        if (a.fadeTarget === 0) { freeAgent(a); return; }
+      }
+    }
+    switch (a.phase) {
+      case 'waiting': {
+        // 停稳且开门前绝不向车门移动：进站/出站/通过时整体后退到安全线内(S.retreat)，
+        // 停稳后平滑归位到成列排队位；横移速率 dt*2.5 属碎步、非奔跑，步态由实际位移驱动。
+        const b = a.bandRef || S.bands[0];
+        const backX = a.sign * clamp(Math.abs(a.queueX) + RETREAT_DIST, b.lo, b.hi);
+        const targetX = S.retreat ? backX : a.queueX;
+        const beforeX = a.x;
+        a.x += (targetX - a.x) * Math.min(1, dt * 2.5);
+        a.gait += Math.abs(a.x - beforeX) * GAIT_PER_M;
+        a.facing = angleLerp(a.facing, a.sign > 0 ? Math.PI / 2 : -Math.PI / 2, Math.min(1, dt * 1.5));
         break;
-      case 'boarding': // 走向对应车门，走到即上车(onboard，carLoad 已在 BOARD 事件里加过)
-        a.x += (a.tx - a.x) * Math.min(1, dt * 2.2);
-        a.z += (a.tz - a.z) * Math.min(1, dt * 2.2);
-        if (!doorOpen || (Math.abs(a.x - a.tx) < 0.12 && Math.abs(a.z - a.tz) < 0.3)) freeAgent(a);
+      }
+      case 'staff': // 客运员固定立岗，不动
         break;
-      case 'alighting': // 下车后先离开车门
-        a.x += (a.tx - a.x) * Math.min(1, dt * 1.8);
-        a.z += (a.tz - a.z) * Math.min(1, dt * 1.8);
-        if (a.t > 0.9) {
-          a.state = 'leaving'; a.t = 0;
-          a.life = a.expLife;
-        }
+      case 'onboard': // 已上车，仅等 fade→0
         break;
-      case 'leaving': // 沿站台走几步后消失
-        a.z += a.dirZ * dt * 0.9;
-        a.x += dt * 0.15;
-        if (a.t > a.life) freeAgent(a);
+      case 'walking': case 'boarding': case 'alighting': case 'leaving': {
+        if (a.startDelay > 0) { a.startDelay -= dt; break; } // 错峰等待（原地淡入/晃动）
+        if (a.next === null) { if (!a.fading) startFade(a, 0); break; } // 路径已尽，只等淡出
+        const before = a.dist;
+        a.dist = Math.min(a.total, a.dist + a.speed * dt);
+        const p = positionOnPath(a);
+        a.x = p.x; a.z = p.z;
+        a.gait += Math.max(0, a.dist - before) * GAIT_PER_M; // 步态由累计路程驱动，停下即不摆
+        a.facing = angleLerp(a.facing, Math.atan2(-p.dx, -p.dz), Math.min(1, dt * 6));
+        if (a.dist >= a.total - 1e-4) onLegEnd(a);
         break;
+      }
       default:
         break;
     }
-    // 硬钳位：x 不进车体(<站台边缘)、不穿出站台；z 不越出停车区间
-    a.x = clamp(a.x, PLATFORM_NEAR, PLATFORM_FAR);
-    a.z = clamp(a.z, S.zMin + 0.5, S.zMax - 0.5);
+    clampAgent(a); // ★ 每帧硬钳位：绝不进轨道、绝不悬空
   }
 
   function writeMatrices() {
-    if (!bodyMesh) return;
+    if (!headMesh) return;
     for (let i = 0; i < maxInstances; i += 1) {
       const a = S.agents[i];
+      const ai = 2 * i;
       if (!a || !a.active) {
-        hide(bodyMesh, i); hide(headMesh, i);
-        if (i < lugCount) hide(lugMesh, i);
+        hide(headMesh, i); hide(torsoMesh, i); hide(lugMesh, i);
+        hide(armsMesh, ai); hide(armsMesh, ai + 1);
+        hide(legsMesh, ai); hide(legsMesh, ai + 1);
         continue;
       }
-      dummy.rotation.set(0, a.facing, 0);
-      dummy.scale.set(1, 1, 1);
-      dummy.position.set(a.x, BODY_CY, a.z); dummy.updateMatrix();
-      bodyMesh.setMatrixAt(i, dummy.matrix);
-      dummy.position.set(a.x, HEAD_CY, a.z); dummy.updateMatrix();
-      headMesh.setMatrixAt(i, dummy.matrix);
-      if (i < lugCount) {
-        if (a.hasLug) {
-          dummy.position.set(a.x + 0.32, LUG_CY, a.z + 0.05); dummy.updateMatrix();
-          lugMesh.setMatrixAt(i, dummy.matrix);
-        } else hide(lugMesh, i);
+      const vis = a.fade;
+      root.position.set(a.x, a.feetY, a.z);
+      root.rotation.set(0, a.facing, 0);
+      root.scale.set(a.girth * vis, a.height * vis, a.girth * vis);
+      root.updateMatrix();
+
+      const moving = ((a.phase === 'walking' || a.phase === 'boarding'
+        || a.phase === 'alighting' || a.phase === 'leaving')
+        && a.startDelay <= 0 && a.next !== null)
+        || (a.phase === 'waiting' && Math.abs(a.x - a.queueX) > 0.05); // 整体后退/归位带碎步
+      const swing = moving ? Math.sin(a.gait) * 0.5 : 0;   // 腿摆幅 ≈ ±0.5 rad
+      const breathe = moving ? 0 : Math.sin(a.waitT + S.time * 1.6) * 0.006;
+
+      place(0, HEAD_Y + breathe, 0, 0, 0, 0, 1, 1, 1, headMesh, i);
+      place(0, TORSO_Y + breathe, 0, 0, 0, 0, 1, 1, 1, torsoMesh, i);
+      place(-ARM_X, SHOULDER_Y + breathe, 0, -swing * 0.7, 0, 0, 1, 1, 1, armsMesh, ai);
+      place(ARM_X, SHOULDER_Y + breathe, 0, swing * 0.7, 0, 0, 1, 1, 1, armsMesh, ai + 1);
+      place(-LEG_X, HIP_Y, 0, swing, 0, 0, 1, 1, 1, legsMesh, ai);
+      place(LEG_X, HIP_Y, 0, -swing, 0, 0, 1, 1, 1, legsMesh, ai + 1);
+      if (a.lugType === 1) {           // 拉杆箱：身侧地面
+        place(0.42, LUG_H / 2, 0.10, 0, 0, 0, 1, 1, 1, lugMesh, i);
+      } else if (a.lugType === 2) {    // 背包：贴背
+        place(0, TORSO_Y, 0.20, 0, 0, 0, 1.1, 1, 0.7, lugMesh, i);
+      } else {
+        hide(lugMesh, i);
       }
     }
-    bodyMesh.instanceMatrix.needsUpdate = true;
-    headMesh.instanceMatrix.needsUpdate = true;
-    if (lugMesh) lugMesh.instanceMatrix.needsUpdate = true;
+    for (const mesh of [headMesh, torsoMesh, armsMesh, legsMesh, lugMesh]) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   const sys = {
@@ -967,42 +1508,49 @@ export function createPassengerSystem(ctx, opts = {}) {
       const sh = acquireShared();
       group = new THREE.Group();
       group.name = 'passengers';
-      bodyMesh = new THREE.InstancedMesh(sh.geos.body, sh.mat, maxInstances);
       headMesh = new THREE.InstancedMesh(sh.geos.head, sh.mat, maxInstances);
-      lugMesh = new THREE.InstancedMesh(sh.geos.lug, sh.mat, lugCount);
-      for (const m of [bodyMesh, headMesh, lugMesh]) {
-        m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        m.frustumCulled = false;
-        for (let i = 0; i < m.count; i += 1) {
-          m.setColorAt(i, color.setHex(0x888888)); // 先分配 instanceColor 缓冲
-          hide(m, i);
+      torsoMesh = new THREE.InstancedMesh(sh.geos.torso, sh.mat, maxInstances);
+      armsMesh = new THREE.InstancedMesh(sh.geos.arms, sh.mat, maxInstances * 2);
+      legsMesh = new THREE.InstancedMesh(sh.geos.legs, sh.mat, maxInstances * 2);
+      lugMesh = new THREE.InstancedMesh(sh.geos.lug, sh.mat, maxInstances);
+      for (const mesh of [headMesh, torsoMesh, armsMesh, legsMesh, lugMesh]) {
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.frustumCulled = false;
+        for (let i = 0; i < mesh.count; i += 1) {
+          mesh.setColorAt(i, color.setHex(0x888888)); // 先分配 instanceColor 缓冲
+          hide(mesh, i);
         }
-        m.instanceColor.needsUpdate = true;
-        m.instanceMatrix.needsUpdate = true;
-        group.add(m);
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        mesh.instanceMatrix.needsUpdate = true;
+        group.add(mesh);
       }
       scene.add(group);
       S.agents = Array.from({ length: maxInstances }, (_, i) => ({
-        i, active: false, state: 'idle', carIndex: 0,
-        x: 0, z: 0, baseX: 0, baseZ: 0, tx: 0, tz: 0,
-        t: 0, life: 3, expLife: 3, dirZ: 1, facing: 0, tint: CLOTHING[0], hasLug: false,
+        i, active: false, phase: 'idle', lane: 'board', carIndex: 0,
+        bandRef: S.bands[0], sign: S.bands[0].sign,
+        x: 0, z: 0, feetY: FEET_Y_FALLBACK, facing: 0, gait: 0,
+        fade: 0, fading: false, fadeTarget: 1,
+        height: 1, girth: 1, tint: CLOTHING[0], pants: PANTS[0], skin: SKINS[0],
+        lugColor: LUGGAGE_COLORS[0], lugType: 0, leaveDir: 1,
+        path: [], seg: [], total: 0, dist: 0, speed: WALK_SPEED, next: null,
+        startDelay: 0, t: 0, waitT: 0, doorZ: 0, boarded: false,
       }));
     },
 
     update(c, dt) {
-      if (!bodyMesh) return;
-      const doorOpen = openNow(c);
+      if (!headMesh) return;
+      S.time += clamp(dt || 0, 0, 0.1);
       const d = clamp(dt || 0, 0, 0.1);
       for (const a of S.agents) {
         if (!a.active) continue;
-        if (!doorOpen && a.state === 'boarding') { freeAgent(a); continue; }
-        stepAgent(a, d, doorOpen);
+        advanceAgent(a, d);
       }
       writeMatrices();
     },
 
     onEvent(type, payload, c) {
       switch (type) {
+        case EVENT.APPROACH: S.retreat = true; break; // 列车进站/通过：在场人员整体后退到安全线内
         case EVENT.ARRIVE: onArrive(payload, c); break;
         case EVENT.DOORS: onDoors(payload, c); break;
         case EVENT.ALIGHT: onAlight(payload, c); break; // framework 里 ALIGHT 先于 BOARD
@@ -1034,8 +1582,8 @@ export function createPassengerSystem(ctx, opts = {}) {
 
     dispose() {
       if (group && scene) scene.remove(group);
-      for (const m of [bodyMesh, headMesh, lugMesh]) m?.dispose?.(); // 释放 instanceMatrix/instanceColor
-      bodyMesh = headMesh = lugMesh = null; group = null;
+      for (const mesh of [headMesh, torsoMesh, armsMesh, legsMesh, lugMesh]) mesh?.dispose?.();
+      headMesh = torsoMesh = armsMesh = legsMesh = lugMesh = null; group = null;
       S.agents.length = 0;
       releaseShared(); // 几何/材质引用计数，最后一个 System 才真释放
       _systems.delete(sys);
