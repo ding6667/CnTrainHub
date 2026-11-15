@@ -92,6 +92,13 @@ h2 .badge {
   vertical-align: 2px;
 }
 h2 .badge.is-ato { border-color: #7fe0a8; color: #7fe0a8; }
+h2 .badge.is-on {
+  border-color: #7fe0a8;
+  color: #7fe0a8;
+  box-shadow: 0 0 0 2px rgba(127, 224, 168, 0.12);
+}
+#o-volume { color: var(--gold); }
+#a-audio.is-on { border-color: rgba(127, 224, 168, 0.55); color: #9ff0bf; }
 button.danger { border-color: rgba(220, 74, 74, 0.6); color: #ff9a8f; }
 button.danger:hover { background: rgba(220, 74, 74, 0.16); }
 #stop-note.is-good { color: #7fe0a8; }

@@ -317,7 +317,8 @@ export function createJourneyRuntime(packDef, host = {}) {
     state.lane = LANE.MAIN;
     state.switchState = LANE.MAIN;
     state.doorState = { state: DOOR_STATE.CLOSED, timer: 0, dwell: 0 };
-    lastZoneId = null;
+    // 不重置 lastZoneId：在站内掉头后不该再发一次 ARRIVE（否则会反复「到站」，
+    // 还连带重复开门提示）。出站时 !ev.inside 分支会正常清掉。
     bus.emit(EVENT.REVERSE, { dir: state.dir, s: state.s });
     bus.emit(EVENT.DIRECTION_CHANGE, { dir: state.dir });
     return state.dir;
@@ -352,15 +353,50 @@ export function createJourneyRuntime(packDef, host = {}) {
     state.velocity = 0;
     registry.get('chunks')?.clear?.();
   }
+  /** 端点掉头保护：车后 / 车前是否还有线路。 */
+  function canReverse() {
+    return state.dir === DIRECTION.FORWARD
+      ? state.s > 1
+      : state.s < alignment.lengthM - 1;
+  }
+
+  /**
+   * 端点发车保护：方向指着线路外时自动折返。
+   * 没有这一步，在 0 km 处按过「逻辑掉头」后 dir=-1，牵引多少秒都原地不动，
+   * 场景一直停在哈西，看起来就是「反复重复、开不出去」。
+   */
+  function ensureDepartureDirection() {
+    let changed = false;
+    if (state.s <= 1 && state.dir === DIRECTION.REVERSE) {
+      state.dir = DIRECTION.FORWARD;
+      changed = true;
+    } else if (state.s >= alignment.lengthM - 1 && state.dir === DIRECTION.FORWARD) {
+      state.dir = DIRECTION.REVERSE;
+      changed = true;
+    }
+    if (changed) {
+      state.startS = state.s;
+      state.progress = 0;
+      state.lane = LANE.MAIN;
+      state.switchState = LANE.MAIN;
+      bus.emit(EVENT.DIRECTION_CHANGE, { dir: state.dir, reason: 'endpoint' });
+    }
+    return changed;
+  }
+
   /** 牵引开关。关掉只是松牵引（惰行），不代替制动 —— 停车要玩家给制动级位。 */
   function setRunning(on) {
     state.running = Boolean(on);
-    if (on) { state.brake = 0; state.emergency = false; state.dsdTimer = 0; }
+    if (on) {
+      ensureDepartureDirection();
+      state.brake = 0; state.emergency = false; state.dsdTimer = 0;
+    }
   }
   /** 牵引级位 0..1；给油即自动松闸并接管。 */
   function setThrottle(v) {
     state.throttle = clamp(Number(v) || 0, 0, 1);
     if (state.throttle > 0) {
+      ensureDepartureDirection();
       state.running = true; state.brake = 0; state.emergency = false;
     }
     state.dsdTimer = 0;
@@ -556,6 +592,7 @@ export function createJourneyRuntime(packDef, host = {}) {
     pack, bus, registry, state, ctx,
     update, dispose,
     setRoute, setTravel, setRunning, setDirection, reverse, setLane,
+    canReverse,
     setTrainSpec, setModel, setFormation, setView, setCameraMode,
     setTheme, setAhead, setDoorRequest, setAutoDwell, setAutoDepart,
     setThrottle, setBrake, setEmergency, setTargetKmh, setAutoDrive,

@@ -12,6 +12,7 @@ import MODELS from '../data.json';
 import { createJourneyRuntime, trainSpecFrom } from './framework.js';
 import { EVENT, DOOR_STATE, DIRECTION, LANE, RAIL } from './core.js';
 import HARBIN_PACK from './packs/harbin.js';
+import { createSoundscape } from './audio.js';
 
 /**
  * 哈尔滨线路漫游 —— 真实铁路模拟（v2）。
@@ -263,6 +264,10 @@ function boot() {
   const stationSys = runtime.registry.get('stations');
   camSys?.setTrainSpec?.(currentSpec());
 
+  // 场景音效：全程序化合成（轮轨 / 牵引 / 制动 / 车门 / 站台广播 / 人群 / 郊外）。
+  // AudioContext 只能由用户手势创建，所以这里只建对象，首次点击或按键时才 resume。
+  const sound = createSoundscape();
+
   /**
    * 到发线横移量按该站**真实站台边缘**算：让列车中心停在「站台边缘 − 1.75 m」，
    * 车侧与站台面只留 7 cm 缝隙（真实高站台就是这样）。旧版 stationLane 默认横移
@@ -304,6 +309,7 @@ function boot() {
     scene.add(train.group);
     contactShadow.scale.y = Math.max(0.4, train.total / 460);
     train.setWireframe(S.wire);
+    sound.setModel(S.modelId);
     train.materials.glass.emissiveIntensity = S.theme === 'night' ? 0.07 : S.theme === 'dusk' ? 0.04 : 0.01;
     const spec = currentSpec();
     runtime.setTrainSpec(spec);
@@ -482,12 +488,98 @@ function boot() {
     notice(open ? '请求开门 · 停稳且全列在区间内' : '车门关闭');
   }
 
+  // ------------------------------------------------------------- 音效 UI ---
+  const volumeEl = $('c-volume');
+  const muteEl = $('c-mute');
+  const ambienceEl = $('c-ambience');
+  function syncAudioUi() {
+    const a = sound.stats();
+    const badge = $('audio-badge');
+    const label = !a.supported ? '不支持'
+      : !a.started ? '待开启'
+        : a.muted ? '静音'
+          : a.state === 'running' ? '运行中' : '已暂停';
+    badge.textContent = label;
+    badge.classList.toggle('is-on', a.started && !a.muted && a.state === 'running');
+    $('a-audio').textContent = !a.started ? '开启声音' : a.muted ? '取消静音' : '声音已开启';
+    $('a-audio').classList.toggle('is-on', a.started && !a.muted && a.state === 'running');
+    if (document.activeElement !== volumeEl) volumeEl.value = String(Math.round(a.volume * 100));
+    $('o-volume').textContent = `${Math.round(a.volume * 100)}%`;
+    muteEl.checked = a.muted;
+    ambienceEl.checked = a.ambience;
+    $('audio-note').textContent = !a.supported
+      ? '当前浏览器不支持 Web Audio，画面不受影响'
+      : a.packFiles > 0
+        ? `真实采样 ${a.packFiles} 段 + 合成兜底 · 按车型/车站自动匹配`
+        : '实时合成 · 按车型变声、按车站播报，可在下方载入授权音效包';
+  }
+  volumeEl.addEventListener('input', () => {
+    sound.setVolume(Number(volumeEl.value) / 100);
+    syncAudioUi();
+  });
+  muteEl.addEventListener('change', () => {
+    sound.setMuted(muteEl.checked);
+    syncAudioUi();
+  });
+  ambienceEl.addEventListener('change', () => {
+    sound.setAmbience(ambienceEl.checked);
+    syncAudioUi();
+  });
+  $('a-audio').addEventListener('click', () => {
+    if (!sound.supported) { notice('当前浏览器不支持 Web Audio'); return; }
+    sound.resume();
+    if (sound.stats().muted) sound.setMuted(false);
+    notice('声音已开启 · 轮轨 / 牵引 / 站台广播 / 人群');
+    syncAudioUi();
+  });
+  $('a-horn').addEventListener('click', () => {
+    sound.resume();
+    sound.horn();
+  });
+  // 授权音效包：只在本地解析、写入 IndexedDB，不上传服务器。
+  const packEl = $('c-audio-pack');
+  $('a-audio-pack').addEventListener('click', () => {
+    sound.resume();
+    packEl.click();
+  });
+  packEl.addEventListener('change', async () => {
+    const files = [...(packEl.files ?? [])];
+    if (!files.length) return;
+    notice(`正在解析 ${files.length} 个音频…`);
+    const r = await sound.loadPack(files);
+    notice(r.loaded
+      ? `音效包已载入 ${r.loaded} 段${r.skipped ? ` · 跳过 ${r.skipped} 个` : ''}`
+      : '没有可用的音频文件');
+    packEl.value = '';
+    syncAudioUi();
+  });
+  // 浏览器要求手势：第一次点画面或按键时静默建流（若之前选了静音则不出声）。
+  const unlockAudio = () => {
+    if (!sound.supported) return;
+    if (!sound.stats().started) sound.resume();
+    syncAudioUi();
+  };
+  document.addEventListener('pointerdown', unlockAudio, { passive: true });
+  document.addEventListener('keydown', unlockAudio);
+  syncAudioUi();
+
+  /** 任何手动牵引 / 制动都视为接管：ATO 立刻退出，否则玩家抢不回控制权。 */
+  function takeManual(reason = '手动接管') {
+    if (!runtime.state.autoDrive) return false;
+    runtime.setAutoDrive(false);
+    syncDriveUi();
+    notice(`${reason} · ATO 已退出`);
+    return true;
+  }
+
   throttleEl.addEventListener('input', () => {
+    takeManual('手动牵引');
     runtime.setThrottle(Number(throttleEl.value) / 100);
     if (Number(throttleEl.value) > 0) brakeEl.value = '0';
     syncDriveUi();
   });
   brakeEl.addEventListener('input', () => {
+    takeManual('手动制动');
     runtime.setBrake(Number(brakeEl.value) / 100);
     if (Number(brakeEl.value) > 0) throttleEl.value = '0';
     syncDriveUi();
@@ -498,8 +590,10 @@ function boot() {
     syncDriveUi();
   });
   $('a-emergency').addEventListener('click', () => {
+    takeManual('手动制动');
     const on = !runtime.state.emergency;
     runtime.setEmergency(on);
+    if (on) sound.event('emergency');
     notice(on ? '紧急制动 · 1.6 m/s²' : '紧急制动缓解');
     syncDriveUi();
   });
@@ -562,6 +656,11 @@ function boot() {
       runtime.setRoute(r.id, km);
     } else runtime.setTravel(km * 1000);
     S.startKm = km;
+    // 从终点站出发时默认反向，否则 s 已在末端、正向牵引一步都走不了。
+    const startDir = km * 1000 > runtime.alignment.lengthM - 1000
+      ? DIRECTION.REVERSE : DIRECTION.FORWARD;
+    runtime.setDirection(startDir);
+    $('c-dir').value = String(startDir);
     setRunning(false);
     routeSel.value = r.id;
     $('sp-route').textContent = r.name;
@@ -606,6 +705,13 @@ function boot() {
     }
   });
   $('a-reverse').addEventListener('click', () => {
+    // 起点 / 终点没有掉头余地：再翻方向就是朝线路外，牵引永远不动。
+    if (!runtime.canReverse()) {
+      notice(runtime.state.dir === DIRECTION.FORWARD
+        ? '已在 0 km 起点 · 前方只有正向，直接牵引即可'
+        : '已在线路终点 · 只能反向，直接牵引即可');
+      return;
+    }
     const d = runtime.reverse();
     $('c-dir').value = String(d);
     notice(d === DIRECTION.REVERSE ? '逻辑掉头 · 仅改变行驶方向' : '恢复正向行驶');
@@ -714,9 +820,26 @@ function boot() {
   bus.on(EVENT.REVERSE, () => notice('逻辑掉头完成 · 车身保持原朝向'));
   bus.on(EVENT.DOORS, (p) => { if (p.state === DOOR_STATE.OPEN) notice('车门开启 · 站台上下客'); });
   bus.on(EVENT.SERVICE_DUE, (p) => notice(`时刻表 · ${p.service?.trainNo ?? '车次'} 到发`));
+  // 音效走同一套事件：进站广播 / 开合门提示 / 道岔落锁 / 发车
+  bus.on(EVENT.APPROACH, () => sound.event('approach'));
+  bus.on(EVENT.ARRIVE, (p) => sound.event('arrive', p));
+  bus.on(EVENT.DEPART, () => sound.event('depart'));
+  bus.on(EVENT.DOORS, (p) => sound.event('doors', p));
+  bus.on(EVENT.SWITCH, () => sound.event('switch'));
+  bus.on(EVENT.DIRECTION_CHANGE, (p) => {
+    $('c-dir').value = String(p.dir);
+    if (p.reason === 'endpoint') {
+      notice(p.dir === DIRECTION.FORWARD ? '已在 0 km 起点 · 自动转为正向发车' : '已在线路终点 · 自动转为反向发车');
+    }
+  });
   bus.on(EVENT.ROUTE_CHANGE, () => chunkSys?.clear?.());
   // 时刻表的「终到立折」由宿主执行：车体不旋转，只翻行驶方向（需求 1/4）
   bus.on(HARBIN_PACK.scheduleEvents?.REVERSE_REQUEST ?? 'timetable:reverse-request', (p) => {
+    // 终到站正好是线路端点时不要翻向线路外，否则 ATO 会卡在 0 km 反复「到站」。
+    if (!runtime.canReverse()) {
+      notice('终到站是线路端点 · 保持当前方向，直接牵引即可离开');
+      return;
+    }
     runtime.setDirection(p?.to ?? DIRECTION.REVERSE);
     $('c-dir').value = String(runtime.state.dir);
     notice('时刻表 · 终到立折，逻辑掉头');
@@ -738,6 +861,7 @@ function boot() {
   }
   /** 空格 / 按钮 = 牵引与惰行切换（松牵引不等于刹车，停车请用 S 或制动滑杆）。 */
   function toggleTraction() {
+    takeManual('手动牵引');
     const on = !runtime.state.running;
     setRunning(on);
     if (on) { runtime.setBrake(0); runtime.setEmergency(false); }
@@ -761,19 +885,30 @@ function boot() {
     switch (e.code) {
       case 'Space': e.preventDefault(); toggleTraction(); break;
       case 'KeyW': case 'ArrowUp':
-        e.preventDefault(); runtime.setThrottle(Math.min(1, st.throttle + 0.1)); syncDriveUi(); syncRunButton(); break;
+        e.preventDefault(); takeManual('手动牵引'); runtime.setThrottle(Math.min(1, st.throttle + 0.1)); syncDriveUi(); syncRunButton(); break;
       case 'KeyS': case 'ArrowDown':
-        e.preventDefault(); runtime.setBrake(Math.min(1, st.brake + 0.1)); syncDriveUi(); syncRunButton(); break;
+        e.preventDefault(); takeManual('手动制动'); runtime.setBrake(Math.min(1, st.brake + 0.1)); syncDriveUi(); syncRunButton(); break;
       case 'KeyD': e.preventDefault(); requestDoors(true); break;
       case 'KeyC': e.preventDefault(); requestDoors(false); break;
       case 'KeyB':
-        e.preventDefault(); runtime.setEmergency(!st.emergency);
+        e.preventDefault(); takeManual('手动制动'); runtime.setEmergency(!st.emergency);
         notice(st.emergency ? '紧急制动缓解' : '紧急制动 · 1.6 m/s²');
         syncDriveUi(); syncRunButton(); break;
       case 'KeyR':
         e.preventDefault();
         if (st.velocity > 0.3) notice('请先停稳再逻辑掉头');
         else $('a-reverse').click();
+        break;
+      case 'KeyH':
+        e.preventDefault();
+        sound.resume();
+        sound.horn();
+        break;
+      case 'KeyM':
+        e.preventDefault();
+        sound.setMuted(!sound.stats().muted);
+        syncAudioUi();
+        notice(sound.stats().muted ? '静音' : '声音已恢复');
         break;
       default: break;
     }
@@ -798,6 +933,29 @@ function boot() {
     if (st.doorRequest === true && $('c-doors').value !== 'open') $('c-doors').value = 'open';
     else if (st.doorRequest === false && $('c-doors').value === 'open') $('c-doors').value = 'close';
     syncDriveUi();
+
+    // ---- 场景音效 ----
+    // 距最近车站中心 620 m 内开始有人声；车门打开再加一层；司机视角整条总线低通。
+    const hereChunk = runtime.chunks.find((c) => c.id === Math.floor(st.s / CHUNK.length));
+    const nearZone = st.stopZone;
+    const stationFactor = nearZone
+      ? Math.max(0, 1 - Math.abs(st.s - nearZone.centerS) / 620)
+      : 0;
+    sound.update(dt, {
+      velocity: st.velocity,
+      throttle: st.running ? st.throttle : 0,
+      brake: st.brake,
+      emergency: st.emergency,
+      view: S.view,
+      theme: S.theme,
+      stationFactor,
+      kind: hereChunk?.kind ?? CHUNK_KIND.RURAL,
+      doorsOpen: st.doorState.state === DOOR_STATE.OPEN,
+      s: st.s,
+      density: S.density,
+      modelId: S.modelId,
+      station: st.stopZone,
+    });
 
     sky.position.copy(cam.position);
     if (sunSprite) sunSprite.position.copy(cam.position).add(sunOffset);
@@ -868,7 +1026,7 @@ function boot() {
         : '车门关闭 · 未在停车区间',
       [DOOR_STATE.BLOCKED]: '禁止开门 · 车门越出区间',
     }[st.doorState.state] ?? '车门关闭';
-    doorEl.textContent = `${doorTxt}${ev?.doorMileages?.length ? ` · 余量 ${Math.max(0, Math.min(ev.frontMargin, ev.rearMargin)).toFixed(0)} m` : ''}`;
+    doorEl.textContent = `${doorTxt}${ev?.doorMileages?.length ? ` · 余量 ${Math.max(0, Math.min(ev.frontMargin, ev.rearMargin)).toFixed(0)} m` : ''}${st.autoDrive && st.autoDepart && st.doorState.state === DOOR_STATE.OPEN ? ` · ${Math.max(0, Math.ceil((zone?.dwellSec ?? 30) - (st.doorState.dwell ?? 0)))} s 后自动发车` : ''}`;
     doorEl.className = st.doorState.state === DOOR_STATE.OPEN ? 'hintline is-open'
       : !st.doorsCanOpen ? 'hintline is-blocked' : 'hintline';
 
@@ -885,7 +1043,7 @@ function boot() {
         ? `${t.nextStop} · ${t.nextArrive ?? ''}` : '—';
     }
 
-    const here = runtime.chunks.find((c) => c.id === Math.floor(st.s / CHUNK.length));
+    const here = hereChunk;
     if (here && here.kind !== lastKind) {
       lastKind = here.kind;
       const label = {
@@ -968,6 +1126,7 @@ function boot() {
         passengers: passengerSys?.stats?.() ?? null,
         schedule: scheduleSys?.stats?.() ?? null,
         station: stationSys?.state ?? null,
+        audio: sound.stats(),
         params: { ...S, ...st },
       };
     };
@@ -977,6 +1136,7 @@ function boot() {
     window.CNTHUB_JOURNEY.renderer = renderer;
     window.CNTHUB_JOURNEY.controls = camSys;
     window.CNTHUB_JOURNEY.runtime = runtime;
+    window.CNTHUB_JOURNEY.sound = sound;
     window.CNTHUB_JOURNEY.api = {
       setTravel(m) { runtime.setTravel(m); },
       setRunning,

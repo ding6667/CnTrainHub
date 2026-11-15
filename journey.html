@@ -108,6 +108,20 @@
         </section>
 
         <section class="grp">
+          <h2>声音 <span class="badge" id="audio-badge">待开启</span></h2>
+          <div class="row"><label for="c-volume">主音量</label><output id="o-volume">55%</output><input id="c-volume" type="range" min="0" max="100" step="5" value="55" /></div>
+          <div class="row switch"><label for="c-mute">静音</label><input id="c-mute" type="checkbox" class="tgl" /></div>
+          <div class="row switch"><label for="c-ambience">站台 / 城市环境音</label><input id="c-ambience" type="checkbox" class="tgl" checked /></div>
+          <div class="acts">
+            <button id="a-audio" type="button" class="primary">开启声音</button>
+            <button id="a-horn" type="button">鸣笛 H</button>
+            <button id="a-audio-pack" type="button">载入音效包</button>
+            <input id="c-audio-pack" type="file" accept="audio/*,.wav,.mp3,.ogg,.m4a" multiple hidden />
+          </div>
+          <p class="hintline" id="audio-note">浏览器要求先点一次才允许播放；默认实时合成，可载入本地授权音效包</p>
+        </section>
+
+        <section class="grp">
           <h2>动作</h2>
           <div class="acts">
             <button id="a-reset" type="button">重置</button>
@@ -125,7 +139,7 @@
         <div id="gauge-meta"><span id="odo">0.00 km</span><span id="atp-note">ATP 300</span><span id="state">停车</span></div>
       </div>
       <button id="run" type="button"><span class="dot"></span><span id="run-label">牵引</span></button>
-      <p id="hint">W/S 牵引·制动 · D/C 开关门 · 空格惰行 · B 紧急制动 · 左键/中键/滚轮调镜头</p>
+      <p id="hint">W/S 牵引·制动 · D/C 开关门 · 空格惰行 · B 紧急制动 · H 鸣笛 · M 静音 · 左键/中键/滚轮调镜头</p>
     </div>
 
     <dl id="specs">
